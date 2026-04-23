@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -14,6 +16,14 @@ import {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+type DashboardTab = "bond" | "project";
+
+type Interpretation = {
+  label: string;
+  summary: string;
+  assumptions: string[];
+};
 
 type BondInstrument = {
   instrument_id: string;
@@ -38,12 +48,6 @@ type BondForm = {
   min_rate_shock: number;
   max_rate_shock: number;
   steps: number;
-};
-
-type Interpretation = {
-  label: string;
-  summary: string;
-  assumptions: string[];
 };
 
 type BondValuationResponse = {
@@ -71,7 +75,30 @@ type BondScenarioResponse = {
   series: BondScenarioPoint[];
 };
 
-const fallbackForm: BondForm = {
+type ProjectForm = {
+  initial_investment: number;
+  discount_rate: number;
+  cash_flows_text: string;
+};
+
+type CashFlowPoint = {
+  year: number;
+  cash_flow: number;
+  cumulative_cash_flow: number;
+};
+
+type ProjectFeasibilityResponse = {
+  results: {
+    npv: number;
+    irr: number | null;
+    payback_period: number | null;
+    cumulative_cash_flow_final: number;
+  };
+  interpretation: Interpretation;
+  series: CashFlowPoint[];
+};
+
+const fallbackBondForm: BondForm = {
   face_value: 10000,
   coupon_rate: 0.04,
   market_yield: 0.045,
@@ -81,6 +108,12 @@ const fallbackForm: BondForm = {
   min_rate_shock: -0.02,
   max_rate_shock: 0.02,
   steps: 9,
+};
+
+const fallbackProjectForm: ProjectForm = {
+  initial_investment: 200000000,
+  discount_rate: 0.1,
+  cash_flows_text: "70000000, 80000000, 90000000, 85000000",
 };
 
 function formatMoney(value: number, digits = 0) {
@@ -101,7 +134,7 @@ function formatNumber(value: number, digits = 3) {
   }).format(value);
 }
 
-function toApiPayload(form: BondForm) {
+function toBondPayload(form: BondForm) {
   return {
     face_value: Number(form.face_value),
     coupon_rate: Number(form.coupon_rate),
@@ -112,10 +145,18 @@ function toApiPayload(form: BondForm) {
   };
 }
 
-function validateForm(form: BondForm): string | null {
+function parseCashFlows(text: string): number[] {
+  return text
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => Number(item));
+}
+
+function validateBondForm(form: BondForm): string | null {
   if (form.face_value <= 0) return "액면가는 0보다 커야 합니다.";
   if (form.investment_amount <= 0) return "투자금액은 0보다 커야 합니다.";
-  if (form.payment_frequency <= 0) return "연 지급 횟수는 1 이상이어야 합니다.";
+  if (form.payment_frequency <= 0) return "연간 지급 횟수는 1 이상이어야 합니다.";
   if (form.maturity_years <= 0) return "만기는 0보다 커야 합니다.";
   if (form.coupon_rate < 0) return "표면금리는 음수일 수 없습니다.";
   if (form.market_yield < 0) return "시장수익률은 음수일 수 없습니다.";
@@ -124,6 +165,18 @@ function validateForm(form: BondForm): string | null {
   }
   if (form.steps < 3) return "시나리오 개수는 3 이상이어야 합니다.";
   if (form.steps > 25) return "시나리오 개수는 25 이하여야 합니다.";
+  return null;
+}
+
+function validateProjectForm(form: ProjectForm): string | null {
+  if (form.initial_investment <= 0) return "초기 투자금은 0보다 커야 합니다.";
+  if (form.discount_rate < 0) return "할인율은 음수일 수 없습니다.";
+
+  const cashFlows = parseCashFlows(form.cash_flows_text);
+  if (cashFlows.length === 0) return "연도별 현금흐름을 하나 이상 입력해야 합니다.";
+  if (cashFlows.some((cashFlow) => Number.isNaN(cashFlow))) {
+    return "현금흐름은 쉼표로 구분한 숫자여야 합니다.";
+  }
 
   return null;
 }
@@ -146,14 +199,21 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<DashboardTab>("bond");
   const [instruments, setInstruments] = useState<BondInstrument[]>([]);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
-  const [form, setForm] = useState<BondForm>(fallbackForm);
+  const [bondForm, setBondForm] = useState<BondForm>(fallbackBondForm);
+  const [projectForm, setProjectForm] =
+    useState<ProjectForm>(fallbackProjectForm);
   const [valuation, setValuation] = useState<BondValuationResponse | null>(null);
   const [scenario, setScenario] = useState<BondScenarioResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
+  const [projectResult, setProjectResult] =
+    useState<ProjectFeasibilityResponse | null>(null);
+  const [bondLoading, setBondLoading] = useState(false);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [bondError, setBondError] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [bondWarning, setBondWarning] = useState<string | null>(null);
 
   const selectedInstrument = useMemo(
     () =>
@@ -165,8 +225,44 @@ export default function Home() {
 
   const priceGap = useMemo(() => {
     if (!valuation) return null;
-    return valuation.results.present_value - form.face_value;
-  }, [form.face_value, valuation]);
+    return valuation.results.present_value - bondForm.face_value;
+  }, [bondForm.face_value, valuation]);
+
+  const projectDecisionSummary = useMemo(() => {
+    if (!projectResult) return "분석을 실행하면 투자 타당성 판단 포인트를 요약해 드립니다.";
+
+    const positives: string[] = [];
+    const cautions: string[] = [];
+
+    if (projectResult.results.npv > 0) {
+      positives.push("NPV가 양수라 할인율 기준으로 경제적 여유가 있습니다.");
+    } else if (projectResult.results.npv < 0) {
+      cautions.push("NPV가 음수라 현재 가정만으로는 투자 매력이 약합니다.");
+    } else {
+      cautions.push("NPV가 0에 가까워 추가 가정 검토가 필요합니다.");
+    }
+
+    if (
+      projectResult.results.irr !== null &&
+      projectResult.results.irr > projectForm.discount_rate
+    ) {
+      positives.push("IRR이 할인율을 상회합니다.");
+    } else if (projectResult.results.irr !== null) {
+      cautions.push("IRR이 할인율을 넘지 못합니다.");
+    } else {
+      cautions.push("현금흐름 패턴상 IRR이 정의되지 않습니다.");
+    }
+
+    if (projectResult.results.payback_period !== null) {
+      positives.push(
+        `투자금 회수 예상 시점은 약 ${formatNumber(projectResult.results.payback_period, 2)}년입니다.`,
+      );
+    } else {
+      cautions.push("입력한 기간 안에는 투자금 회수가 어렵습니다.");
+    }
+
+    return [...positives, ...cautions].join(" ");
+  }, [projectForm.discount_rate, projectResult]);
 
   useEffect(() => {
     let mounted = true;
@@ -180,7 +276,7 @@ export default function Home() {
 
         if (firstInstrument) {
           setSelectedInstrumentId(firstInstrument.instrument_id);
-          setForm((current) => ({
+          setBondForm((current) => ({
             ...current,
             face_value: firstInstrument.face_value,
             coupon_rate: firstInstrument.coupon_rate,
@@ -192,7 +288,7 @@ export default function Home() {
       })
       .catch((caught: Error) => {
         if (mounted) {
-          setError(`채권 목록을 불러오지 못했습니다. ${caught.message}`);
+          setBondError(`채권 목록을 불러오지 못했습니다. ${caught.message}`);
         }
       });
 
@@ -203,15 +299,15 @@ export default function Home() {
 
   async function handleSelectInstrument(instrumentId: string) {
     setSelectedInstrumentId(instrumentId);
-    setError(null);
-    setWarning(null);
+    setBondError(null);
+    setBondWarning(null);
 
     try {
       const payload = await fetchJson<{ instrument: BondInstrument }>(
         `/api/bonds/market-data?instrument_id=${encodeURIComponent(instrumentId)}`,
       );
 
-      setForm((current) => ({
+      setBondForm((current) => ({
         ...current,
         face_value: payload.instrument.face_value,
         coupon_rate: payload.instrument.coupon_rate,
@@ -225,28 +321,28 @@ export default function Home() {
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
-      setError(`채권 데이터를 불러오지 못했습니다. ${message}`);
+      setBondError(`채권 데이터를 불러오지 못했습니다. ${message}`);
     }
   }
 
-  async function handleCalculate() {
-    const validationMessage = validateForm(form);
+  async function handleBondCalculate() {
+    const validationMessage = validateBondForm(bondForm);
     if (validationMessage) {
-      setError(validationMessage);
+      setBondError(validationMessage);
       return;
     }
 
-    setLoading(true);
-    setError(null);
-    setWarning(null);
+    setBondLoading(true);
+    setBondError(null);
+    setBondWarning(null);
 
     try {
-      const valuationPayload = toApiPayload(form);
+      const valuationPayload = toBondPayload(bondForm);
       const scenarioPayload = {
         ...valuationPayload,
-        min_rate_shock: Number(form.min_rate_shock),
-        max_rate_shock: Number(form.max_rate_shock),
-        steps: Number(form.steps),
+        min_rate_shock: Number(bondForm.min_rate_shock),
+        max_rate_shock: Number(bondForm.max_rate_shock),
+        steps: Number(bondForm.steps),
       };
 
       const [valuationResult, scenarioResult] = await Promise.all([
@@ -264,23 +360,65 @@ export default function Home() {
       setScenario(scenarioResult);
 
       if (valuationResult.results.modified_duration > 7) {
-        setWarning(
+        setBondWarning(
           "Modified Duration이 높아 금리 변화에 따른 가격 민감도가 큰 채권입니다.",
         );
       }
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
-      setError(`계산에 실패했습니다. ${message}`);
+      setBondError(`계산에 실패했습니다. ${message}`);
     } finally {
-      setLoading(false);
+      setBondLoading(false);
     }
   }
 
-  function updateForm(key: keyof BondForm, value: string) {
-    setForm((current) => ({
+  async function handleProjectCalculate() {
+    const validationMessage = validateProjectForm(projectForm);
+    if (validationMessage) {
+      setProjectError(validationMessage);
+      return;
+    }
+
+    setProjectLoading(true);
+    setProjectError(null);
+
+    try {
+      const payload = {
+        initial_investment: Number(projectForm.initial_investment),
+        discount_rate: Number(projectForm.discount_rate),
+        cash_flows: parseCashFlows(projectForm.cash_flows_text),
+      };
+
+      const result = await fetchJson<ProjectFeasibilityResponse>(
+        "/api/projects/feasibility",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      );
+
+      setProjectResult(result);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
+      setProjectError(`프로젝트 분석에 실패했습니다. ${message}`);
+    } finally {
+      setProjectLoading(false);
+    }
+  }
+
+  function updateBondForm(key: keyof BondForm, value: string) {
+    setBondForm((current) => ({
       ...current,
       [key]: Number(value),
+    }));
+  }
+
+  function updateProjectForm(key: keyof ProjectForm, value: string) {
+    setProjectForm((current) => ({
+      ...current,
+      [key]: key === "cash_flows_text" ? value : Number(value),
     }));
   }
 
@@ -293,337 +431,547 @@ export default function Home() {
               Asset Risk Integrated System
             </p>
             <h1 className="mt-1 text-3xl font-bold text-[#111827]">
-              ARIS 채권 가치평가
+              ARIS 금융 분석 대시보드
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#5b6675]">
-              샘플 채권을 선택하고 투자 가정과 금리 충격을 조정해 현재가치,
-              Duration, Convexity, 시나리오 가격을 확인합니다.
+              채권 가치평가와 프로젝트 사업성 분석을 같은 화면에서 확인하고,
+              백엔드 계산 결과를 바로 검증할 수 있습니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm font-medium">
-            <span className="border-b-2 border-[#1f6feb] px-3 py-2 text-[#1f4f8f]">
-              자산 평가
-            </span>
-            <span className="px-3 py-2 text-[#7a8492]">신용 위험</span>
-            <span className="px-3 py-2 text-[#7a8492]">프로젝트</span>
-            <span className="px-3 py-2 text-[#7a8492]">시장 위험</span>
+            <TabButton
+              active={activeTab === "bond"}
+              label="채권"
+              onClick={() => setActiveTab("bond")}
+            />
+            <span className="px-3 py-2 text-[#7a8492]">자산 확장 예정</span>
+            <TabButton
+              active={activeTab === "project"}
+              label="프로젝트"
+              onClick={() => setActiveTab("project")}
+            />
+            <span className="px-3 py-2 text-[#7a8492]">시장 위험 예정</span>
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
-          <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">채권 입력</h2>
-              {selectedInstrument?.credit_rating ? (
-                <span className="rounded bg-[#e6f4ea] px-2 py-1 text-xs font-semibold text-[#1b6b3a]">
-                  {selectedInstrument.credit_rating}
-                </span>
-              ) : null}
-            </div>
-
-            <label className="mt-5 block text-sm font-medium text-[#384252]">
-              샘플 채권
-              <select
-                className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
-                value={selectedInstrumentId}
-                onChange={(event) => handleSelectInstrument(event.target.value)}
-              >
-                {instruments.length === 0 ? (
-                  <option value="">백엔드 연결 대기 중</option>
+        {activeTab === "bond" ? (
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">채권 입력</h2>
+                {selectedInstrument?.credit_rating ? (
+                  <span className="rounded bg-[#e6f4ea] px-2 py-1 text-xs font-semibold text-[#1b6b3a]">
+                    {selectedInstrument.credit_rating}
+                  </span>
                 ) : null}
-                {instruments.map((instrument) => (
-                  <option
-                    key={instrument.instrument_id}
-                    value={instrument.instrument_id}
-                  >
-                    {instrument.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {selectedInstrument ? (
-              <div className="mt-3 rounded border border-[#e5e7eb] bg-[#f9fafb] p-3 text-xs leading-5 text-[#5b6675]">
-                <div>발행자: {selectedInstrument.issuer}</div>
-                <div>통화: {selectedInstrument.currency}</div>
-                <div>표면금리: {formatPercent(selectedInstrument.coupon_rate)}</div>
-                <div>시장수익률: {formatPercent(selectedInstrument.market_yield)}</div>
               </div>
-            ) : null}
 
-            <div className="mt-5 grid gap-4">
-              <NumberField
-                label="투자금액"
-                suffix="원"
-                value={form.investment_amount}
-                onChange={(value) => updateForm("investment_amount", value)}
-              />
-              <NumberField
-                label="액면가"
-                suffix="원"
-                value={form.face_value}
-                onChange={(value) => updateForm("face_value", value)}
-              />
-              <NumberField
-                label="표면금리"
-                step="0.001"
-                suffix="decimal"
-                value={form.coupon_rate}
-                onChange={(value) => updateForm("coupon_rate", value)}
-              />
-              <NumberField
-                label="시장수익률"
-                step="0.001"
-                suffix="decimal"
-                value={form.market_yield}
-                onChange={(value) => updateForm("market_yield", value)}
-              />
-            </div>
+              <label className="mt-5 block text-sm font-medium text-[#384252]">
+                샘플 채권
+                <select
+                  className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                  value={selectedInstrumentId}
+                  onChange={(event) => handleSelectInstrument(event.target.value)}
+                >
+                  {instruments.length === 0 ? (
+                    <option value="">백엔드 연결 대기 중</option>
+                  ) : null}
+                  {instruments.map((instrument) => (
+                    <option
+                      key={instrument.instrument_id}
+                      value={instrument.instrument_id}
+                    >
+                      {instrument.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <details className="mt-5 rounded border border-[#d9dee7] bg-[#fafbfc] p-4">
-              <summary className="cursor-pointer text-sm font-semibold">
-                고급 설정
-              </summary>
-              <div className="mt-4 grid gap-4">
-                <NumberField
-                  label="만기"
-                  step="0.5"
-                  suffix="년"
-                  value={form.maturity_years}
-                  onChange={(value) => updateForm("maturity_years", value)}
-                />
-                <NumberField
-                  label="연 지급 횟수"
-                  step="1"
-                  suffix="회"
-                  value={form.payment_frequency}
-                  onChange={(value) => updateForm("payment_frequency", value)}
-                />
-                <NumberField
-                  label="최소 금리 충격"
-                  step="0.005"
-                  suffix="decimal"
-                  value={form.min_rate_shock}
-                  onChange={(value) => updateForm("min_rate_shock", value)}
-                />
-                <NumberField
-                  label="최대 금리 충격"
-                  step="0.005"
-                  suffix="decimal"
-                  value={form.max_rate_shock}
-                  onChange={(value) => updateForm("max_rate_shock", value)}
-                />
-                <NumberField
-                  label="시나리오 개수"
-                  step="1"
-                  suffix="개"
-                  value={form.steps}
-                  onChange={(value) => updateForm("steps", value)}
-                />
-              </div>
-            </details>
-
-            <button
-              className="mt-5 w-full rounded bg-[#1f6feb] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
-              disabled={loading}
-              onClick={handleCalculate}
-            >
-              {loading ? "계산 중..." : "채권 가치평가 실행"}
-            </button>
-
-            {error ? (
-              <div className="mt-4 rounded border border-[#f0b4a7] bg-[#fff4f1] p-3 text-sm leading-6 text-[#9f2f1f]">
-                {error}
-              </div>
-            ) : null}
-
-            {warning ? (
-              <div className="mt-4 rounded border border-[#f0d58a] bg-[#fff8e1] p-3 text-sm leading-6 text-[#8a5a00]">
-                {warning}
-              </div>
-            ) : null}
-          </aside>
-
-          <section className="flex flex-col gap-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <MetricCard
-                label="현재가치"
-                value={
-                  valuation
-                    ? `${formatMoney(valuation.results.present_value)} 원`
-                    : "-"
-                }
-                hint="미래 현금흐름의 할인 가치"
-              />
-              <MetricCard
-                label="액면가 대비"
-                value={
-                  priceGap !== null
-                    ? `${priceGap >= 0 ? "+" : ""}${formatMoney(priceGap)} 원`
-                    : "-"
-                }
-                hint={
-                  priceGap === null
-                    ? "프리미엄/디스카운트 여부"
-                    : priceGap >= 0
-                      ? "액면가 대비 프리미엄"
-                      : "액면가 대비 디스카운트"
-                }
-              />
-              <MetricCard
-                label="Macaulay Duration"
-                value={
-                  valuation
-                    ? `${formatNumber(valuation.results.macaulay_duration)} 년`
-                    : "-"
-                }
-                hint="현금흐름 회수시점의 가중평균"
-              />
-              <MetricCard
-                label="Modified Duration"
-                value={
-                  valuation
-                    ? `${formatNumber(valuation.results.modified_duration)}`
-                    : "-"
-                }
-                hint="금리 변화에 대한 1차 민감도"
-              />
-              <MetricCard
-                label="Convexity"
-                value={
-                  valuation ? formatNumber(valuation.results.convexity) : "-"
-                }
-                hint="금리 변화에 대한 2차 민감도"
-              />
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold">금리 시나리오</h2>
-                    <p className="mt-1 text-sm text-[#6b7280]">
-                      금리 충격별 채권 가격 변화를 비교합니다.
-                    </p>
-                  </div>
-                  <p className="text-sm font-medium text-[#49627a]">
-                    기준가격{" "}
-                    {scenario
-                      ? `${formatMoney(scenario.results.base_price)} 원`
-                      : "-"}
-                  </p>
+              {selectedInstrument ? (
+                <div className="mt-3 rounded border border-[#e5e7eb] bg-[#f9fafb] p-3 text-xs leading-5 text-[#5b6675]">
+                  <div>발행사: {selectedInstrument.issuer}</div>
+                  <div>통화: {selectedInstrument.currency}</div>
+                  <div>표면금리: {formatPercent(selectedInstrument.coupon_rate)}</div>
+                  <div>시장수익률: {formatPercent(selectedInstrument.market_yield)}</div>
                 </div>
+              ) : null}
 
-                <div className="mt-5 h-80">
-                  {scenario ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart
-                        data={scenario.series.map((point) => ({
-                          ...point,
-                          shockLabel: `${(point.rate_shock * 100).toFixed(1)}%p`,
-                        }))}
-                        margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
-                      >
-                        <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
-                        <ReferenceLine
-                          y={scenario.results.base_price}
-                          stroke="#94a3b8"
-                        />
-                        <XAxis
-                          dataKey="shockLabel"
-                          tick={{ fill: "#5b6675", fontSize: 12 }}
-                        />
-                        <YAxis
-                          tick={{ fill: "#5b6675", fontSize: 12 }}
-                          tickFormatter={(value) => formatMoney(Number(value))}
-                          width={82}
-                        />
-                        <Tooltip
-                          formatter={(value, key) => {
-                            if (key === "price") {
-                              return [`${formatMoney(Number(value))} 원`, "가격"];
-                            }
-                            return [value, key];
-                          }}
-                          labelFormatter={(label) => `금리 충격 ${label}`}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="price"
-                          stroke="#1f6feb"
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 5 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="flex h-full items-center justify-center rounded border border-dashed border-[#cfd6e0] text-sm text-[#7a8492]">
-                      계산을 실행하면 시나리오 차트가 표시됩니다.
-                    </div>
-                  )}
-                </div>
+              <div className="mt-5 grid gap-4">
+                <NumberField
+                  label="투자금액"
+                  suffix="원"
+                  value={bondForm.investment_amount}
+                  onChange={(value) => updateBondForm("investment_amount", value)}
+                />
+                <NumberField
+                  label="액면가"
+                  suffix="원"
+                  value={bondForm.face_value}
+                  onChange={(value) => updateBondForm("face_value", value)}
+                />
+                <NumberField
+                  label="표면금리"
+                  step="0.001"
+                  suffix="decimal"
+                  value={bondForm.coupon_rate}
+                  onChange={(value) => updateBondForm("coupon_rate", value)}
+                />
+                <NumberField
+                  label="시장수익률"
+                  step="0.001"
+                  suffix="decimal"
+                  value={bondForm.market_yield}
+                  onChange={(value) => updateBondForm("market_yield", value)}
+                />
               </div>
 
-              <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-semibold">포지션 요약</h2>
-                <div className="mt-4 space-y-3 text-sm text-[#4b5563]">
-                  <SummaryRow
-                    label="표면금리"
-                    value={formatPercent(form.coupon_rate)}
-                  />
-                  <SummaryRow
-                    label="시장수익률"
-                    value={formatPercent(form.market_yield)}
-                  />
-                  <SummaryRow
+              <details className="mt-5 rounded border border-[#d9dee7] bg-[#fafbfc] p-4">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  고급 설정
+                </summary>
+                <div className="mt-4 grid gap-4">
+                  <NumberField
                     label="만기"
-                    value={`${formatNumber(form.maturity_years, 1)} 년`}
+                    step="0.5"
+                    suffix="년"
+                    value={bondForm.maturity_years}
+                    onChange={(value) => updateBondForm("maturity_years", value)}
                   />
-                  <SummaryRow
-                    label="연 지급 횟수"
-                    value={`${form.payment_frequency} 회`}
-                  />
-                  <SummaryRow
-                    label="투자금액"
-                    value={`${formatMoney(form.investment_amount)} 원`}
-                  />
-                  <SummaryRow
-                    label="예상 매수 수량"
-                    value={
-                      valuation?.results.estimated_units
-                        ? `${formatNumber(valuation.results.estimated_units)} 단위`
-                        : "-"
+                  <NumberField
+                    label="연간 지급 횟수"
+                    step="1"
+                    suffix="회"
+                    value={bondForm.payment_frequency}
+                    onChange={(value) =>
+                      updateBondForm("payment_frequency", value)
                     }
                   />
+                  <NumberField
+                    label="최소 금리 충격"
+                    step="0.005"
+                    suffix="decimal"
+                    value={bondForm.min_rate_shock}
+                    onChange={(value) => updateBondForm("min_rate_shock", value)}
+                  />
+                  <NumberField
+                    label="최대 금리 충격"
+                    step="0.005"
+                    suffix="decimal"
+                    value={bondForm.max_rate_shock}
+                    onChange={(value) => updateBondForm("max_rate_shock", value)}
+                  />
+                  <NumberField
+                    label="시나리오 개수"
+                    step="1"
+                    suffix="개"
+                    value={bondForm.steps}
+                    onChange={(value) => updateBondForm("steps", value)}
+                  />
                 </div>
-              </section>
-            </div>
+              </details>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <InterpretationPanel
-                title="결과 해석"
-                summary={
-                  valuation?.interpretation.summary ??
-                  "계산을 실행하면 채권 가치와 금리 민감도에 대한 해석이 표시됩니다."
-                }
-                assumptions={valuation?.interpretation.assumptions ?? []}
-              />
-              <InterpretationPanel
-                title="입력 가정"
-                summary="수익률과 표면금리는 연율 decimal 값입니다. 모든 숫자는 backend 계산 결과를 기준으로 표시됩니다."
-                assumptions={[
-                  `표면금리 ${formatPercent(form.coupon_rate)}`,
-                  `시장수익률 ${formatPercent(form.market_yield)}`,
-                  `금리 충격 ${formatPercent(form.min_rate_shock)} ~ ${formatPercent(
-                    form.max_rate_shock,
-                  )}`,
-                  "금리 상승 시 일반적으로 채권 가격은 하락합니다.",
-                ]}
-              />
-            </div>
+              <button
+                className="mt-5 w-full rounded bg-[#1f6feb] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                disabled={bondLoading}
+                onClick={handleBondCalculate}
+              >
+                {bondLoading ? "계산 중..." : "채권 가치평가 실행"}
+              </button>
+
+              {bondError ? <AlertBox tone="error">{bondError}</AlertBox> : null}
+              {bondWarning ? (
+                <AlertBox tone="warning">{bondWarning}</AlertBox>
+              ) : null}
+            </aside>
+
+            <section className="flex flex-col gap-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                <MetricCard
+                  label="현재가치"
+                  value={
+                    valuation ? `${formatMoney(valuation.results.present_value)} 원` : "-"
+                  }
+                  hint="미래 현금흐름을 할인한 채권 가격"
+                />
+                <MetricCard
+                  label="액면가 대비"
+                  value={
+                    priceGap !== null
+                      ? `${priceGap >= 0 ? "+" : ""}${formatMoney(priceGap)} 원`
+                      : "-"
+                  }
+                  hint={
+                    priceGap === null
+                      ? "프리미엄 또는 디스카운트 여부"
+                      : priceGap >= 0
+                        ? "액면가 대비 프리미엄"
+                        : "액면가 대비 디스카운트"
+                  }
+                />
+                <MetricCard
+                  label="Macaulay Duration"
+                  value={
+                    valuation
+                      ? `${formatNumber(valuation.results.macaulay_duration)} 년`
+                      : "-"
+                  }
+                  hint="현금흐름 회수 시점의 가중평균"
+                />
+                <MetricCard
+                  label="Modified Duration"
+                  value={
+                    valuation
+                      ? `${formatNumber(valuation.results.modified_duration)}`
+                      : "-"
+                  }
+                  hint="금리 변화에 대한 1차 가격 민감도"
+                />
+                <MetricCard
+                  label="Convexity"
+                  value={
+                    valuation ? formatNumber(valuation.results.convexity) : "-"
+                  }
+                  hint="금리 변화에 대한 2차 민감도"
+                />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">금리 시나리오</h2>
+                      <p className="mt-1 text-sm text-[#6b7280]">
+                        금리 충격에 따라 채권 가격이 얼마나 흔들리는지 비교합니다.
+                      </p>
+                    </div>
+                    <p className="text-sm font-medium text-[#49627a]">
+                      기준 가격{" "}
+                      {scenario
+                        ? `${formatMoney(scenario.results.base_price)} 원`
+                        : "-"}
+                    </p>
+                  </div>
+
+                  <div className="mt-5 h-80">
+                    {scenario ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={scenario.series.map((point) => ({
+                            ...point,
+                            shockLabel: `${(point.rate_shock * 100).toFixed(1)}%p`,
+                          }))}
+                          margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
+                        >
+                          <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                          <ReferenceLine
+                            y={scenario.results.base_price}
+                            stroke="#94a3b8"
+                          />
+                          <XAxis
+                            dataKey="shockLabel"
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                          />
+                          <YAxis
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                            tickFormatter={(value) => formatMoney(Number(value))}
+                            width={82}
+                          />
+                          <Tooltip
+                            formatter={(value, key) => {
+                              if (key === "price") {
+                                return [`${formatMoney(Number(value))} 원`, "가격"];
+                              }
+                              return [value, key];
+                            }}
+                            labelFormatter={(label) => `금리 충격 ${label}`}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="price"
+                            stroke="#1f6feb"
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyChart message="계산을 실행하면 금리 시나리오 차트가 표시됩니다." />
+                    )}
+                  </div>
+                </div>
+
+                <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold">포지션 요약</h2>
+                  <div className="mt-4 space-y-3 text-sm text-[#4b5563]">
+                    <SummaryRow
+                      label="표면금리"
+                      value={formatPercent(bondForm.coupon_rate)}
+                    />
+                    <SummaryRow
+                      label="시장수익률"
+                      value={formatPercent(bondForm.market_yield)}
+                    />
+                    <SummaryRow
+                      label="만기"
+                      value={`${formatNumber(bondForm.maturity_years, 1)} 년`}
+                    />
+                    <SummaryRow
+                      label="연간 지급 횟수"
+                      value={`${bondForm.payment_frequency} 회`}
+                    />
+                    <SummaryRow
+                      label="투자금액"
+                      value={`${formatMoney(bondForm.investment_amount)} 원`}
+                    />
+                    <SummaryRow
+                      label="예상 매수 수량"
+                      value={
+                        valuation?.results.estimated_units
+                          ? `${formatNumber(valuation.results.estimated_units)} 단위`
+                          : "-"
+                      }
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <InterpretationPanel
+                  title="결과 해석"
+                  summary={
+                    valuation?.interpretation.summary ??
+                    "계산을 실행하면 채권 가치와 금리 민감도에 대한 해석이 표시됩니다."
+                  }
+                  assumptions={valuation?.interpretation.assumptions ?? []}
+                />
+                <InterpretationPanel
+                  title="입력 가정"
+                  summary="수익률과 표면금리는 decimal 값으로 입력합니다. 모든 수치는 백엔드 계산 결과를 기준으로 표시됩니다."
+                  assumptions={[
+                    `표면금리 ${formatPercent(bondForm.coupon_rate)}`,
+                    `시장수익률 ${formatPercent(bondForm.market_yield)}`,
+                    `금리 충격 ${formatPercent(bondForm.min_rate_shock)} ~ ${formatPercent(
+                      bondForm.max_rate_shock,
+                    )}`,
+                    "금리가 오르면 일반적으로 채권 가격은 하락합니다.",
+                  ]}
+                />
+              </div>
+            </section>
           </section>
-        </section>
+        ) : (
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold">프로젝트 입력</h2>
+              <p className="mt-2 text-sm leading-6 text-[#5b6675]">
+                초기 투자금, 할인율, 연도별 현금흐름을 입력하면 NPV, IRR,
+                회수기간을 계산합니다.
+              </p>
+
+              <div className="mt-5 grid gap-4">
+                <NumberField
+                  label="초기 투자금"
+                  suffix="원"
+                  value={projectForm.initial_investment}
+                  onChange={(value) =>
+                    updateProjectForm("initial_investment", value)
+                  }
+                />
+                <NumberField
+                  label="할인율"
+                  step="0.001"
+                  suffix="decimal"
+                  value={projectForm.discount_rate}
+                  onChange={(value) => updateProjectForm("discount_rate", value)}
+                />
+                <label className="block text-sm font-medium text-[#384252]">
+                  연도별 현금흐름
+                  <textarea
+                    className="mt-2 min-h-36 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                    value={projectForm.cash_flows_text}
+                    onChange={(event) =>
+                      updateProjectForm("cash_flows_text", event.target.value)
+                    }
+                  />
+                  <span className="mt-2 block text-xs text-[#7a8492]">
+                    예: 70000000, 80000000, 90000000, 85000000
+                  </span>
+                </label>
+              </div>
+
+              <button
+                className="mt-5 w-full rounded bg-[#1f6feb] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                disabled={projectLoading}
+                onClick={handleProjectCalculate}
+              >
+                {projectLoading ? "계산 중..." : "프로젝트 사업성 분석"}
+              </button>
+
+              {projectError ? (
+                <AlertBox tone="error">{projectError}</AlertBox>
+              ) : null}
+            </aside>
+
+            <section className="flex flex-col gap-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <MetricCard
+                  label="NPV"
+                  value={
+                    projectResult
+                      ? `${formatMoney(projectResult.results.npv)} 원`
+                      : "-"
+                  }
+                  hint="할인율 기준 순현재가치"
+                />
+                <MetricCard
+                  label="IRR"
+                  value={
+                    projectResult?.results.irr !== null &&
+                    projectResult?.results.irr !== undefined
+                      ? formatPercent(projectResult.results.irr, 2)
+                      : "정의되지 않음"
+                  }
+                  hint="내부수익률"
+                />
+                <MetricCard
+                  label="Payback Period"
+                  value={
+                    projectResult?.results.payback_period !== null &&
+                    projectResult?.results.payback_period !== undefined
+                      ? `${formatNumber(projectResult.results.payback_period)} 년`
+                      : "회수 불가"
+                  }
+                  hint="부분 연도 보간 포함"
+                />
+                <MetricCard
+                  label="최종 누적 현금흐름"
+                  value={
+                    projectResult
+                      ? `${formatMoney(
+                          projectResult.results.cumulative_cash_flow_final,
+                        )} 원`
+                      : "-"
+                  }
+                  hint="전체 기간 종료 시 누적 값"
+                />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">현금흐름 차트</h2>
+                      <p className="mt-1 text-sm text-[#6b7280]">
+                        연도별 현금흐름과 누적 회수 흐름을 함께 봅니다.
+                      </p>
+                    </div>
+                    <p className="text-sm font-medium text-[#49627a]">
+                      할인율 {formatPercent(projectForm.discount_rate)}
+                    </p>
+                  </div>
+
+                  <div className="mt-5 h-80">
+                    {projectResult ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={projectResult.series.map((point) => ({
+                            ...point,
+                            yearLabel: `Y${point.year}`,
+                          }))}
+                          margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
+                        >
+                          <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                          <ReferenceLine y={0} stroke="#94a3b8" />
+                          <XAxis
+                            dataKey="yearLabel"
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                          />
+                          <YAxis
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                            tickFormatter={(value) => formatMoney(Number(value))}
+                            width={96}
+                          />
+                          <Tooltip
+                            formatter={(value, key) => {
+                              if (
+                                key === "cash_flow" ||
+                                key === "cumulative_cash_flow"
+                              ) {
+                                return [
+                                  `${formatMoney(Number(value))} 원`,
+                                  key === "cash_flow"
+                                    ? "연도별 현금흐름"
+                                    : "누적 현금흐름",
+                                ];
+                              }
+                              return [value, key];
+                            }}
+                          />
+                          <Bar
+                            dataKey="cash_flow"
+                            fill="#1f6feb"
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="cumulative_cash_flow"
+                            stroke="#ff7a00"
+                            strokeWidth={3}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyChart message="분석을 실행하면 현금흐름 차트가 표시됩니다." />
+                    )}
+                  </div>
+                </div>
+
+                <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold">입력 요약</h2>
+                  <div className="mt-4 space-y-3 text-sm text-[#4b5563]">
+                    <SummaryRow
+                      label="초기 투자금"
+                      value={`${formatMoney(projectForm.initial_investment)} 원`}
+                    />
+                    <SummaryRow
+                      label="할인율"
+                      value={formatPercent(projectForm.discount_rate)}
+                    />
+                    <SummaryRow
+                      label="분석 연도 수"
+                      value={`${parseCashFlows(projectForm.cash_flows_text).length} 년`}
+                    />
+                    <SummaryRow
+                      label="입력 현금흐름"
+                      value={`${parseCashFlows(projectForm.cash_flows_text).length} 개`}
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <InterpretationPanel
+                  title="결과 해석"
+                  summary={
+                    projectResult?.interpretation.summary ??
+                    "분석을 실행하면 NPV, IRR, Payback Period에 대한 해석이 표시됩니다."
+                  }
+                  assumptions={projectResult?.interpretation.assumptions ?? []}
+                />
+                <InterpretationPanel
+                  title="판단 기준"
+                  summary={projectDecisionSummary}
+                  assumptions={[
+                    `할인율 ${formatPercent(projectForm.discount_rate)}`,
+                    "IRR은 현금흐름 패턴에 따라 정의되지 않을 수 있습니다.",
+                    "Payback Period는 부분 연도를 보간해 계산합니다.",
+                  ]}
+                />
+              </div>
+            </section>
+          </section>
+        )}
       </div>
     </main>
   );
@@ -709,5 +1057,52 @@ function InterpretationPanel({
         </ul>
       ) : null}
     </section>
+  );
+}
+
+function AlertBox({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: "error" | "warning";
+}) {
+  const className =
+    tone === "error"
+      ? "mt-4 rounded border border-[#f0b4a7] bg-[#fff4f1] p-3 text-sm leading-6 text-[#9f2f1f]"
+      : "mt-4 rounded border border-[#f0d58a] bg-[#fff8e1] p-3 text-sm leading-6 text-[#8a5a00]";
+
+  return <div className={className}>{children}</div>;
+}
+
+function EmptyChart({ message }: { message: string }) {
+  return (
+    <div className="flex h-full items-center justify-center rounded border border-dashed border-[#cfd6e0] text-sm text-[#7a8492]">
+      {message}
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={
+        active
+          ? "border-b-2 border-[#1f6feb] px-3 py-2 text-[#1f4f8f]"
+          : "px-3 py-2 text-[#7a8492]"
+      }
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
   );
 }

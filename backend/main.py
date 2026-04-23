@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.assets import router as assets_router
 from app.api.bonds import router as bonds_router
 from app.api.health import router as health_router
+from app.api.projects import router as projects_router
 
 app = FastAPI(title="ARIS Backend")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(assets_router)
 app.include_router(bonds_router)
+app.include_router(projects_router)
 
 
 @app.get("/")
