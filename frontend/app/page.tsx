@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -39,6 +40,12 @@ type BondForm = {
   steps: number;
 };
 
+type Interpretation = {
+  label: string;
+  summary: string;
+  assumptions: string[];
+};
+
 type BondValuationResponse = {
   results: {
     present_value: number;
@@ -47,11 +54,7 @@ type BondValuationResponse = {
     convexity: number;
     estimated_units: number | null;
   };
-  interpretation: {
-    label: string;
-    summary: string;
-    assumptions: string[];
-  };
+  interpretation: Interpretation;
 };
 
 type BondScenarioPoint = {
@@ -64,11 +67,7 @@ type BondScenarioResponse = {
   results: {
     base_price: number;
   };
-  interpretation: {
-    label: string;
-    summary: string;
-    assumptions: string[];
-  };
+  interpretation: Interpretation;
   series: BondScenarioPoint[];
 };
 
@@ -84,14 +83,22 @@ const fallbackForm: BondForm = {
   steps: 9,
 };
 
-function formatMoney(value: number) {
+function formatMoney(value: number, digits = 0) {
   return new Intl.NumberFormat("ko-KR", {
-    maximumFractionDigits: 0,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   }).format(value);
 }
 
-function formatPercent(value: number) {
-  return `${(value * 100).toFixed(2)}%`;
+function formatPercent(value: number, digits = 2) {
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function formatNumber(value: number, digits = 3) {
+  return new Intl.NumberFormat("ko-KR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
 }
 
 function toApiPayload(form: BondForm) {
@@ -103,6 +110,22 @@ function toApiPayload(form: BondForm) {
     payment_frequency: Number(form.payment_frequency),
     investment_amount: Number(form.investment_amount),
   };
+}
+
+function validateForm(form: BondForm): string | null {
+  if (form.face_value <= 0) return "액면가는 0보다 커야 합니다.";
+  if (form.investment_amount <= 0) return "투자금액은 0보다 커야 합니다.";
+  if (form.payment_frequency <= 0) return "연 지급 횟수는 1 이상이어야 합니다.";
+  if (form.maturity_years <= 0) return "만기는 0보다 커야 합니다.";
+  if (form.coupon_rate < 0) return "표면금리는 음수일 수 없습니다.";
+  if (form.market_yield < 0) return "시장수익률은 음수일 수 없습니다.";
+  if (form.min_rate_shock >= form.max_rate_shock) {
+    return "최소 금리 충격은 최대 금리 충격보다 작아야 합니다.";
+  }
+  if (form.steps < 3) return "시나리오 개수는 3 이상이어야 합니다.";
+  if (form.steps > 25) return "시나리오 개수는 25 이하여야 합니다.";
+
+  return null;
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -130,6 +153,7 @@ export default function Home() {
   const [scenario, setScenario] = useState<BondScenarioResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const selectedInstrument = useMemo(
     () =>
@@ -139,14 +163,17 @@ export default function Home() {
     [instruments, selectedInstrumentId],
   );
 
+  const priceGap = useMemo(() => {
+    if (!valuation) return null;
+    return valuation.results.present_value - form.face_value;
+  }, [form.face_value, valuation]);
+
   useEffect(() => {
     let mounted = true;
 
     fetchJson<{ instruments: BondInstrument[] }>("/api/bonds/instruments")
       .then((payload) => {
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
 
         setInstruments(payload.instruments);
         const firstInstrument = payload.instruments[0];
@@ -177,11 +204,13 @@ export default function Home() {
   async function handleSelectInstrument(instrumentId: string) {
     setSelectedInstrumentId(instrumentId);
     setError(null);
+    setWarning(null);
 
     try {
       const payload = await fetchJson<{ instrument: BondInstrument }>(
         `/api/bonds/market-data?instrument_id=${encodeURIComponent(instrumentId)}`,
       );
+
       setForm((current) => ({
         ...current,
         face_value: payload.instrument.face_value,
@@ -190,6 +219,9 @@ export default function Home() {
         maturity_years: payload.instrument.maturity_years,
         payment_frequency: payload.instrument.payment_frequency,
       }));
+
+      setValuation(null);
+      setScenario(null);
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
@@ -198,8 +230,15 @@ export default function Home() {
   }
 
   async function handleCalculate() {
+    const validationMessage = validateForm(form);
+    if (validationMessage) {
+      setError(validationMessage);
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setWarning(null);
 
     try {
       const valuationPayload = toApiPayload(form);
@@ -223,6 +262,12 @@ export default function Home() {
 
       setValuation(valuationResult);
       setScenario(scenarioResult);
+
+      if (valuationResult.results.modified_duration > 7) {
+        setWarning(
+          "Modified Duration이 높아 금리 변화에 따른 가격 민감도가 큰 채권입니다.",
+        );
+      }
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
@@ -247,7 +292,7 @@ export default function Home() {
             <p className="text-sm font-semibold text-[#49627a]">
               Asset Risk Integrated System
             </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-normal text-[#111827]">
+            <h1 className="mt-1 text-3xl font-bold text-[#111827]">
               ARIS 채권 가치평가
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#5b6675]">
@@ -255,7 +300,7 @@ export default function Home() {
               Duration, Convexity, 시나리오 가격을 확인합니다.
             </p>
           </div>
-          <div className="flex gap-2 text-sm font-medium">
+          <div className="flex flex-wrap gap-2 text-sm font-medium">
             <span className="border-b-2 border-[#1f6feb] px-3 py-2 text-[#1f4f8f]">
               자산 평가
             </span>
@@ -298,32 +343,38 @@ export default function Home() {
             </label>
 
             {selectedInstrument ? (
-              <p className="mt-2 text-xs leading-5 text-[#6b7280]">
-                발행자: {selectedInstrument.issuer} / 통화:{" "}
-                {selectedInstrument.currency}
-              </p>
+              <div className="mt-3 rounded border border-[#e5e7eb] bg-[#f9fafb] p-3 text-xs leading-5 text-[#5b6675]">
+                <div>발행자: {selectedInstrument.issuer}</div>
+                <div>통화: {selectedInstrument.currency}</div>
+                <div>표면금리: {formatPercent(selectedInstrument.coupon_rate)}</div>
+                <div>시장수익률: {formatPercent(selectedInstrument.market_yield)}</div>
+              </div>
             ) : null}
 
             <div className="mt-5 grid gap-4">
               <NumberField
                 label="투자금액"
+                suffix="원"
                 value={form.investment_amount}
                 onChange={(value) => updateForm("investment_amount", value)}
               />
               <NumberField
                 label="액면가"
+                suffix="원"
                 value={form.face_value}
                 onChange={(value) => updateForm("face_value", value)}
               />
               <NumberField
                 label="표면금리"
                 step="0.001"
+                suffix="decimal"
                 value={form.coupon_rate}
                 onChange={(value) => updateForm("coupon_rate", value)}
               />
               <NumberField
                 label="시장수익률"
                 step="0.001"
+                suffix="decimal"
                 value={form.market_yield}
                 onChange={(value) => updateForm("market_yield", value)}
               />
@@ -335,32 +386,37 @@ export default function Home() {
               </summary>
               <div className="mt-4 grid gap-4">
                 <NumberField
-                  label="만기(년)"
+                  label="만기"
                   step="0.5"
+                  suffix="년"
                   value={form.maturity_years}
                   onChange={(value) => updateForm("maturity_years", value)}
                 />
                 <NumberField
                   label="연 지급 횟수"
                   step="1"
+                  suffix="회"
                   value={form.payment_frequency}
                   onChange={(value) => updateForm("payment_frequency", value)}
                 />
                 <NumberField
                   label="최소 금리 충격"
                   step="0.005"
+                  suffix="decimal"
                   value={form.min_rate_shock}
                   onChange={(value) => updateForm("min_rate_shock", value)}
                 />
                 <NumberField
                   label="최대 금리 충격"
                   step="0.005"
+                  suffix="decimal"
                   value={form.max_rate_shock}
                   onChange={(value) => updateForm("max_rate_shock", value)}
                 />
                 <NumberField
                   label="시나리오 개수"
                   step="1"
+                  suffix="개"
                   value={form.steps}
                   onChange={(value) => updateForm("steps", value)}
                 />
@@ -372,7 +428,7 @@ export default function Home() {
               disabled={loading}
               onClick={handleCalculate}
             >
-              {loading ? "계산 중" : "채권 가치평가 실행"}
+              {loading ? "계산 중..." : "채권 가치평가 실행"}
             </button>
 
             {error ? (
@@ -380,10 +436,16 @@ export default function Home() {
                 {error}
               </div>
             ) : null}
+
+            {warning ? (
+              <div className="mt-4 rounded border border-[#f0d58a] bg-[#fff8e1] p-3 text-sm leading-6 text-[#8a5a00]">
+                {warning}
+              </div>
+            ) : null}
           </aside>
 
           <section className="flex flex-col gap-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <MetricCard
                 label="현재가치"
                 value={
@@ -391,13 +453,28 @@ export default function Home() {
                     ? `${formatMoney(valuation.results.present_value)} 원`
                     : "-"
                 }
-                hint="미래 현금흐름의 할인가치"
+                hint="미래 현금흐름의 할인 가치"
+              />
+              <MetricCard
+                label="액면가 대비"
+                value={
+                  priceGap !== null
+                    ? `${priceGap >= 0 ? "+" : ""}${formatMoney(priceGap)} 원`
+                    : "-"
+                }
+                hint={
+                  priceGap === null
+                    ? "프리미엄/디스카운트 여부"
+                    : priceGap >= 0
+                      ? "액면가 대비 프리미엄"
+                      : "액면가 대비 디스카운트"
+                }
               />
               <MetricCard
                 label="Macaulay Duration"
                 value={
                   valuation
-                    ? `${valuation.results.macaulay_duration.toFixed(3)} 년`
+                    ? `${formatNumber(valuation.results.macaulay_duration)} 년`
                     : "-"
                 }
                 hint="현금흐름 회수시점의 가중평균"
@@ -406,7 +483,7 @@ export default function Home() {
                 label="Modified Duration"
                 value={
                   valuation
-                    ? `${valuation.results.modified_duration.toFixed(3)}`
+                    ? `${formatNumber(valuation.results.modified_duration)}`
                     : "-"
                 }
                 hint="금리 변화에 대한 1차 민감도"
@@ -414,68 +491,113 @@ export default function Home() {
               <MetricCard
                 label="Convexity"
                 value={
-                  valuation ? valuation.results.convexity.toFixed(3) : "-"
+                  valuation ? formatNumber(valuation.results.convexity) : "-"
                 }
                 hint="금리 변화에 대한 2차 민감도"
               />
             </div>
 
-            <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">금리 시나리오</h2>
-                  <p className="mt-1 text-sm text-[#6b7280]">
-                    금리 충격별 채권 가격 변화를 비교합니다.
+            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold">금리 시나리오</h2>
+                    <p className="mt-1 text-sm text-[#6b7280]">
+                      금리 충격별 채권 가격 변화를 비교합니다.
+                    </p>
+                  </div>
+                  <p className="text-sm font-medium text-[#49627a]">
+                    기준가격{" "}
+                    {scenario
+                      ? `${formatMoney(scenario.results.base_price)} 원`
+                      : "-"}
                   </p>
                 </div>
-                <p className="text-sm font-medium text-[#49627a]">
-                  기준가격{" "}
-                  {scenario ? `${formatMoney(scenario.results.base_price)} 원` : "-"}
-                </p>
+
+                <div className="mt-5 h-80">
+                  {scenario ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={scenario.series.map((point) => ({
+                          ...point,
+                          shockLabel: `${(point.rate_shock * 100).toFixed(1)}%p`,
+                        }))}
+                        margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
+                      >
+                        <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                        <ReferenceLine
+                          y={scenario.results.base_price}
+                          stroke="#94a3b8"
+                        />
+                        <XAxis
+                          dataKey="shockLabel"
+                          tick={{ fill: "#5b6675", fontSize: 12 }}
+                        />
+                        <YAxis
+                          tick={{ fill: "#5b6675", fontSize: 12 }}
+                          tickFormatter={(value) => formatMoney(Number(value))}
+                          width={82}
+                        />
+                        <Tooltip
+                          formatter={(value, key) => {
+                            if (key === "price") {
+                              return [`${formatMoney(Number(value))} 원`, "가격"];
+                            }
+                            return [value, key];
+                          }}
+                          labelFormatter={(label) => `금리 충격 ${label}`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="price"
+                          stroke="#1f6feb"
+                          strokeWidth={3}
+                          dot={{ r: 3 }}
+                          activeDot={{ r: 5 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-full items-center justify-center rounded border border-dashed border-[#cfd6e0] text-sm text-[#7a8492]">
+                      계산을 실행하면 시나리오 차트가 표시됩니다.
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="mt-5 h-80">
-                {scenario ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={scenario.series.map((point) => ({
-                        ...point,
-                        shockLabel: `${(point.rate_shock * 100).toFixed(1)}%p`,
-                      }))}
-                      margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
-                    >
-                      <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
-                      <XAxis
-                        dataKey="shockLabel"
-                        tick={{ fill: "#5b6675", fontSize: 12 }}
-                      />
-                      <YAxis
-                        tick={{ fill: "#5b6675", fontSize: 12 }}
-                        tickFormatter={(value) => formatMoney(Number(value))}
-                        width={76}
-                      />
-                      <Tooltip
-                        formatter={(value) => [
-                          `${formatMoney(Number(value))} 원`,
-                          "가격",
-                        ]}
-                        labelFormatter={(label) => `금리 충격 ${label}`}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="price"
-                        stroke="#1f6feb"
-                        strokeWidth={3}
-                        dot={{ r: 3 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex h-full items-center justify-center rounded border border-dashed border-[#cfd6e0] text-sm text-[#7a8492]">
-                    계산을 실행하면 시나리오 차트가 표시됩니다.
-                  </div>
-                )}
-              </div>
+              <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                <h2 className="text-lg font-semibold">포지션 요약</h2>
+                <div className="mt-4 space-y-3 text-sm text-[#4b5563]">
+                  <SummaryRow
+                    label="표면금리"
+                    value={formatPercent(form.coupon_rate)}
+                  />
+                  <SummaryRow
+                    label="시장수익률"
+                    value={formatPercent(form.market_yield)}
+                  />
+                  <SummaryRow
+                    label="만기"
+                    value={`${formatNumber(form.maturity_years, 1)} 년`}
+                  />
+                  <SummaryRow
+                    label="연 지급 횟수"
+                    value={`${form.payment_frequency} 회`}
+                  />
+                  <SummaryRow
+                    label="투자금액"
+                    value={`${formatMoney(form.investment_amount)} 원`}
+                  />
+                  <SummaryRow
+                    label="예상 매수 수량"
+                    value={
+                      valuation?.results.estimated_units
+                        ? `${formatNumber(valuation.results.estimated_units)} 단위`
+                        : "-"
+                    }
+                  />
+                </div>
+              </section>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -483,19 +605,20 @@ export default function Home() {
                 title="결과 해석"
                 summary={
                   valuation?.interpretation.summary ??
-                  "계산을 실행하면 채권 가치와 민감도에 대한 해석이 표시됩니다."
+                  "계산을 실행하면 채권 가치와 금리 민감도에 대한 해석이 표시됩니다."
                 }
                 assumptions={valuation?.interpretation.assumptions ?? []}
               />
               <InterpretationPanel
                 title="입력 가정"
-                summary="수익률과 표면금리는 연율 decimal 값을 사용합니다. 모든 계산은 백엔드 API 결과를 기준으로 표시됩니다."
+                summary="수익률과 표면금리는 연율 decimal 값입니다. 모든 숫자는 backend 계산 결과를 기준으로 표시됩니다."
                 assumptions={[
                   `표면금리 ${formatPercent(form.coupon_rate)}`,
                   `시장수익률 ${formatPercent(form.market_yield)}`,
                   `금리 충격 ${formatPercent(form.min_rate_shock)} ~ ${formatPercent(
                     form.max_rate_shock,
                   )}`,
+                  "금리 상승 시 일반적으로 채권 가격은 하락합니다.",
                 ]}
               />
             </div>
@@ -511,15 +634,20 @@ function NumberField({
   value,
   onChange,
   step = "1",
+  suffix,
 }: {
   label: string;
   value: number;
   onChange: (value: string) => void;
   step?: string;
+  suffix?: string;
 }) {
   return (
     <label className="block text-sm font-medium text-[#384252]">
-      {label}
+      <div className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        {suffix ? <span className="text-xs text-[#7a8492]">{suffix}</span> : null}
+      </div>
       <input
         className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
         type="number"
@@ -543,10 +671,17 @@ function MetricCard({
   return (
     <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
       <p className="text-sm font-medium text-[#5b6675]">{label}</p>
-      <p className="mt-3 text-2xl font-bold tracking-normal text-[#111827]">
-        {value}
-      </p>
+      <p className="mt-3 text-2xl font-bold text-[#111827]">{value}</p>
       <p className="mt-2 text-xs leading-5 text-[#7a8492]">{hint}</p>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-[#eef1f5] pb-3 last:border-b-0 last:pb-0">
+      <span className="text-[#5b6675]">{label}</span>
+      <span className="font-semibold text-[#111827]">{value}</span>
     </div>
   );
 }

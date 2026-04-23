@@ -51,4 +51,3 @@ def post_bond_scenarios(request: BondScenarioRequest) -> BondScenarioResponse:
         return calculate_bond_scenarios(request)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-

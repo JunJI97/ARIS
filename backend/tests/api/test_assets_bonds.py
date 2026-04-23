@@ -110,6 +110,24 @@ class AssetsAndBondsApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["series"]), 5)
 
+    def test_bond_scenarios_api_rejects_invalid_rate_range(self) -> None:
+        response = self.client.post(
+            "/api/bonds/scenarios",
+            json={
+                "face_value": 10000,
+                "coupon_rate": 0.04,
+                "market_yield": 0.045,
+                "maturity_years": 5,
+                "payment_frequency": 2,
+                "min_rate_shock": 0.02,
+                "max_rate_shock": 0.01,
+                "steps": 5,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("최소 금리 충격", response.json()["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()
