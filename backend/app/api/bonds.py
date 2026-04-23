@@ -1,7 +1,15 @@
 from fastapi import APIRouter, HTTPException
 
 from app.data.sample_bonds import get_sample_bond, list_sample_bonds
-from app.schemas.bonds import BondInstrumentsResponse, BondMarketDataResponse
+from app.schemas.bonds import (
+    BondInstrumentsResponse,
+    BondMarketDataResponse,
+    BondScenarioRequest,
+    BondScenarioResponse,
+    BondValuationRequest,
+    BondValuationResponse,
+)
+from app.services.bonds import calculate_bond_scenarios, calculate_bond_valuation
 
 router = APIRouter(prefix="/api/bonds", tags=["bonds"])
 
@@ -30,4 +38,17 @@ def get_bond_market_data(instrument_id: str) -> BondMarketDataResponse:
             "payment_frequency는 연간 이자 지급 횟수입니다.",
         ],
     )
+
+
+@router.post("/valuation", response_model=BondValuationResponse)
+def post_bond_valuation(request: BondValuationRequest) -> BondValuationResponse:
+    return calculate_bond_valuation(request)
+
+
+@router.post("/scenarios", response_model=BondScenarioResponse)
+def post_bond_scenarios(request: BondScenarioRequest) -> BondScenarioResponse:
+    try:
+        return calculate_bond_scenarios(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
