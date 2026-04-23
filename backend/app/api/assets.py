@@ -13,7 +13,7 @@ def get_asset_types() -> AssetTypesResponse:
                 asset_type="bond",
                 label="채권",
                 status="enabled",
-                description="MVP에서 가치평가와 금리 민감도 분석을 지원합니다.",
+                description="MVP에서 가치평가와 금리 민감도 분석이 가능한 활성 자산군입니다.",
             ),
             AssetType(
                 asset_type="stock",
@@ -23,4 +23,3 @@ def get_asset_types() -> AssetTypesResponse:
             ),
         ]
     )
-
