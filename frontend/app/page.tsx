@@ -17,7 +17,8 @@ import {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-type DashboardTab = "bond" | "credit" | "project";
+type DashboardTab = "bond" | "credit" | "project" | "market";
+type AssetType = "bond" | "stock";
 
 type Interpretation = {
   label: string;
@@ -124,6 +125,31 @@ type ProjectFeasibilityResponse = {
   series: CashFlowPoint[];
 };
 
+type MarketRiskForm = {
+  asset_type: AssetType;
+  portfolio_value: number;
+  annualized_volatility: number;
+  holding_period_days: number;
+  confidence_level: 0.9 | 0.95 | 0.99;
+};
+
+type MarketRiskPoint = {
+  confidence_level: number;
+  z_score: number;
+  var_amount: number;
+};
+
+type MarketRiskResponse = {
+  results: {
+    var_amount: number;
+    loss_percent: number;
+    holding_period_volatility: number;
+    z_score: number;
+  };
+  interpretation: Interpretation;
+  series: MarketRiskPoint[];
+};
+
 const fallbackBondForm: BondForm = {
   face_value: 10000,
   coupon_rate: 0.04,
@@ -147,6 +173,14 @@ const fallbackProjectForm: ProjectForm = {
   initial_investment: 200000000,
   discount_rate: 0.1,
   cash_flows_text: "70000000, 80000000, 90000000, 85000000",
+};
+
+const fallbackMarketForm: MarketRiskForm = {
+  asset_type: "bond",
+  portfolio_value: 100000000,
+  annualized_volatility: 0.12,
+  holding_period_days: 10,
+  confidence_level: 0.95,
 };
 
 function formatMoney(value: number, digits = 0) {
@@ -233,6 +267,20 @@ function validateProjectForm(form: ProjectForm): string | null {
   return null;
 }
 
+function validateMarketRiskForm(form: MarketRiskForm): string | null {
+  if (form.portfolio_value <= 0) return "포트폴리오 가치는 0보다 커야 합니다.";
+  if (form.annualized_volatility < 0 || form.annualized_volatility > 5) {
+    return "연율 변동성은 0 이상 5 이하의 decimal 값이어야 합니다.";
+  }
+  if (form.holding_period_days < 1 || form.holding_period_days > 252) {
+    return "보유 기간은 1일 이상 252일 이하여야 합니다.";
+  }
+  if (![0.9, 0.95, 0.99].includes(form.confidence_level)) {
+    return "신뢰수준은 90%, 95%, 99% 중 하나여야 합니다.";
+  }
+  return null;
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -284,6 +332,8 @@ export default function Home() {
     useState<CreditRiskForm>(fallbackCreditForm);
   const [projectForm, setProjectForm] =
     useState<ProjectForm>(fallbackProjectForm);
+  const [marketForm, setMarketForm] =
+    useState<MarketRiskForm>(fallbackMarketForm);
   const [valuation, setValuation] = useState<BondValuationResponse | null>(null);
   const [scenario, setScenario] = useState<BondScenarioResponse | null>(null);
   const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
@@ -291,12 +341,17 @@ export default function Home() {
   );
   const [projectResult, setProjectResult] =
     useState<ProjectFeasibilityResponse | null>(null);
+  const [marketResult, setMarketResult] = useState<MarketRiskResponse | null>(
+    null,
+  );
   const [bondLoading, setBondLoading] = useState(false);
   const [creditLoading, setCreditLoading] = useState(false);
   const [projectLoading, setProjectLoading] = useState(false);
+  const [marketLoading, setMarketLoading] = useState(false);
   const [bondError, setBondError] = useState<string | null>(null);
   const [creditError, setCreditError] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [marketError, setMarketError] = useState<string | null>(null);
   const [bondWarning, setBondWarning] = useState<string | null>(null);
 
   const selectedInstrument = useMemo(
@@ -522,6 +577,32 @@ export default function Home() {
     }
   }
 
+  async function handleMarketCalculate() {
+    const validationMessage = validateMarketRiskForm(marketForm);
+    if (validationMessage) {
+      setMarketError(validationMessage);
+      return;
+    }
+
+    setMarketLoading(true);
+    setMarketError(null);
+
+    try {
+      const result = await fetchJson<MarketRiskResponse>("/api/market-risk/var", {
+        method: "POST",
+        body: JSON.stringify(marketForm),
+      });
+
+      setMarketResult(result);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
+      setMarketError(`시장위험 분석에 실패했습니다. ${message}`);
+    } finally {
+      setMarketLoading(false);
+    }
+  }
+
   function updateBondForm(key: keyof BondForm, value: string) {
     setBondForm((current) => ({
       ...current,
@@ -543,6 +624,19 @@ export default function Home() {
     }));
   }
 
+  function updateMarketForm(
+    key: keyof MarketRiskForm,
+    value: string | AssetType | 0.9 | 0.95 | 0.99,
+  ) {
+    setMarketForm((current) => ({
+      ...current,
+      [key]:
+        key === "asset_type" || key === "confidence_level"
+          ? value
+          : Number(value),
+    }));
+  }
+
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-[#18202a]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6 lg:px-8">
@@ -555,8 +649,8 @@ export default function Home() {
               ARIS 금융 분석 대시보드
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#5b6675]">
-              채권 가치평가, 신용위험, 프로젝트 사업성 분석을 한 화면에서 확인하고,
-              백엔드 계산 결과를 바로 검증할 수 있습니다.
+              채권 가치평가, 신용위험, 프로젝트 사업성, 시장위험 VaR을 한 화면에서
+              확인하고 백엔드 계산 결과를 바로 검증할 수 있습니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm font-medium">
@@ -575,7 +669,11 @@ export default function Home() {
               label="프로젝트"
               onClick={() => setActiveTab("project")}
             />
-            <span className="px-3 py-2 text-[#7a8492]">시장 위험 예정</span>
+            <TabButton
+              active={activeTab === "market"}
+              label="시장위험"
+              onClick={() => setActiveTab("market")}
+            />
           </div>
         </header>
 
@@ -970,11 +1068,7 @@ export default function Home() {
                 />
                 <MetricCard
                   label="등급"
-                  value={
-                    creditResult
-                      ? gradeLabel(creditResult.results.grade)
-                      : "-"
-                  }
+                  value={creditResult ? gradeLabel(creditResult.results.grade) : "-"}
                   hint="Normal / Watch / Default를 한국어로 표시"
                 />
                 <MetricCard
@@ -1083,7 +1177,7 @@ export default function Home() {
               </div>
             </section>
           </section>
-        ) : (
+        ) : activeTab === "project" ? (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
             <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold">프로젝트 입력</h2>
@@ -1289,6 +1383,238 @@ export default function Home() {
                     `할인율 ${formatPercent(projectForm.discount_rate)}`,
                     "IRR은 현금흐름 패턴에 따라 정의되지 않을 수 있습니다.",
                     "Payback Period는 부분 연도를 보간해 계산합니다.",
+                  ]}
+                />
+              </div>
+            </section>
+          </section>
+        ) : (
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold">시장위험 입력</h2>
+              <p className="mt-2 text-sm leading-6 text-[#5b6675]">
+                포트폴리오 가치, 연율 변동성, 보유 기간, 신뢰수준을 입력하면
+                Parametric VaR를 계산합니다.
+              </p>
+
+              <div className="mt-5 grid gap-4">
+                <label className="block text-sm font-medium text-[#384252]">
+                  자산군
+                  <select
+                    className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                    value={marketForm.asset_type}
+                    onChange={(event) =>
+                      updateMarketForm("asset_type", event.target.value as AssetType)
+                    }
+                  >
+                    <option value="bond">bond</option>
+                    <option value="stock">stock (future-ready)</option>
+                  </select>
+                </label>
+                <NumberField
+                  label="포트폴리오 가치"
+                  suffix="원"
+                  value={marketForm.portfolio_value}
+                  onChange={(value) => updateMarketForm("portfolio_value", value)}
+                />
+                <NumberField
+                  label="연율 변동성"
+                  step="0.01"
+                  suffix="decimal"
+                  value={marketForm.annualized_volatility}
+                  onChange={(value) =>
+                    updateMarketForm("annualized_volatility", value)
+                  }
+                />
+                <NumberField
+                  label="보유 기간"
+                  step="1"
+                  suffix="일"
+                  value={marketForm.holding_period_days}
+                  onChange={(value) =>
+                    updateMarketForm("holding_period_days", value)
+                  }
+                />
+                <label className="block text-sm font-medium text-[#384252]">
+                  신뢰수준
+                  <select
+                    className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                    value={String(marketForm.confidence_level)}
+                    onChange={(event) =>
+                      updateMarketForm(
+                        "confidence_level",
+                        Number(event.target.value) as 0.9 | 0.95 | 0.99,
+                      )
+                    }
+                  >
+                    <option value="0.9">90%</option>
+                    <option value="0.95">95%</option>
+                    <option value="0.99">99%</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-4 rounded border border-[#e5e7eb] bg-[#f9fafb] p-3 text-xs leading-5 text-[#5b6675]">
+                <div>변동성은 연율 기준 decimal 값입니다.</div>
+                <div>보유 기간 변동성은 제곱근 시간 규칙으로 환산합니다.</div>
+                <div>VaR는 분석 추정치이며 실제 최대손실을 보장하지 않습니다.</div>
+              </div>
+
+              <button
+                className="mt-5 w-full rounded bg-[#1f6feb] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                disabled={marketLoading}
+                onClick={handleMarketCalculate}
+              >
+                {marketLoading ? "계산 중..." : "시장위험 VaR 계산"}
+              </button>
+
+              {marketError ? (
+                <AlertBox tone="error">{marketError}</AlertBox>
+              ) : null}
+            </aside>
+
+            <section className="flex flex-col gap-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <MetricCard
+                  label="VaR 금액"
+                  value={
+                    marketResult
+                      ? `${formatMoney(marketResult.results.var_amount)} 원`
+                      : "-"
+                  }
+                  hint="선택한 신뢰수준과 보유 기간 기준 잠재 손실 추정치"
+                />
+                <MetricCard
+                  label="손실률"
+                  value={
+                    marketResult
+                      ? formatPercent(marketResult.results.loss_percent, 2)
+                      : "-"
+                  }
+                  hint="포트폴리오 가치 대비 VaR 비율"
+                />
+                <MetricCard
+                  label="보유 기간 변동성"
+                  value={
+                    marketResult
+                      ? formatPercent(
+                          marketResult.results.holding_period_volatility,
+                          2,
+                        )
+                      : "-"
+                  }
+                  hint="제곱근 시간 규칙 적용 후 변동성"
+                />
+                <MetricCard
+                  label="z-score"
+                  value={
+                    marketResult ? formatNumber(marketResult.results.z_score, 4) : "-"
+                  }
+                  hint="정규분포 신뢰수준 대응 값"
+                />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">신뢰수준별 VaR</h2>
+                      <p className="mt-1 text-sm text-[#6b7280]">
+                        동일한 포트폴리오 조건에서 신뢰수준에 따라 VaR가 어떻게 커지는지 확인합니다.
+                      </p>
+                    </div>
+                    <p className="text-sm font-medium text-[#49627a]">
+                      자산군 {marketForm.asset_type}
+                    </p>
+                  </div>
+
+                  <div className="mt-5 h-80">
+                    {marketResult ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={marketResult.series.map((point) => ({
+                            ...point,
+                            confidenceLabel: `${Math.round(
+                              point.confidence_level * 100,
+                            )}%`,
+                          }))}
+                          margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
+                        >
+                          <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                          <XAxis
+                            dataKey="confidenceLabel"
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                          />
+                          <YAxis
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                            tickFormatter={(value) => formatMoney(Number(value))}
+                            width={96}
+                          />
+                          <Tooltip
+                            formatter={(value, key) => {
+                              if (key === "var_amount") {
+                                return [`${formatMoney(Number(value))} 원`, "VaR"];
+                              }
+                              if (key === "z_score") {
+                                return [formatNumber(Number(value), 4), "z-score"];
+                              }
+                              return [value, key];
+                            }}
+                          />
+                          <Bar
+                            dataKey="var_amount"
+                            fill="#1f6feb"
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyChart message="계산을 실행하면 신뢰수준별 VaR 차트가 표시됩니다." />
+                    )}
+                  </div>
+                </div>
+
+                <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold">입력 요약</h2>
+                  <div className="mt-4 space-y-3 text-sm text-[#4b5563]">
+                    <SummaryRow label="자산군" value={marketForm.asset_type} />
+                    <SummaryRow
+                      label="포트폴리오 가치"
+                      value={`${formatMoney(marketForm.portfolio_value)} 원`}
+                    />
+                    <SummaryRow
+                      label="연율 변동성"
+                      value={formatPercent(marketForm.annualized_volatility, 2)}
+                    />
+                    <SummaryRow
+                      label="보유 기간"
+                      value={`${marketForm.holding_period_days} 일`}
+                    />
+                    <SummaryRow
+                      label="신뢰수준"
+                      value={`${Math.round(marketForm.confidence_level * 100)}%`}
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <InterpretationPanel
+                  title="결과 해석"
+                  summary={
+                    marketResult?.interpretation.summary ??
+                    "계산을 실행하면 VaR 결과와 가정이 표시됩니다."
+                  }
+                  assumptions={marketResult?.interpretation.assumptions ?? []}
+                />
+                <InterpretationPanel
+                  title="판단 기준"
+                  summary="VaR는 선택한 신뢰수준 안에서 예상되는 잠재 손실 규모를 보여주는 지표입니다. 신뢰수준이 높아질수록, 변동성과 포트폴리오 가치가 커질수록 VaR도 커집니다."
+                  assumptions={[
+                    `신뢰수준 ${Math.round(marketForm.confidence_level * 100)}%`,
+                    `연율 변동성 ${formatPercent(marketForm.annualized_volatility, 2)}`,
+                    `보유 기간 ${marketForm.holding_period_days}일`,
+                    "VaR는 투자 조언이 아니라 위험 규모를 비교하는 분석 도구입니다.",
                   ]}
                 />
               </div>

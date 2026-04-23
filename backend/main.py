@@ -5,6 +5,7 @@ from app.api.assets import router as assets_router
 from app.api.bonds import router as bonds_router
 from app.api.credit_risk import router as credit_risk_router
 from app.api.health import router as health_router
+from app.api.market_risk import router as market_risk_router
 from app.api.projects import router as projects_router
 
 app = FastAPI(title="ARIS Backend")
@@ -21,6 +22,7 @@ app.include_router(health_router)
 app.include_router(assets_router)
 app.include_router(bonds_router)
 app.include_router(credit_risk_router)
+app.include_router(market_risk_router)
 app.include_router(projects_router)
 
 
