@@ -73,6 +73,43 @@ class AssetsAndBondsApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("Unknown bond instrument_id", response.json()["detail"])
 
+    def test_bond_valuation_api_returns_core_metrics(self) -> None:
+        response = self.client.post(
+            "/api/bonds/valuation",
+            json={
+                "face_value": 10000,
+                "coupon_rate": 0.04,
+                "market_yield": 0.045,
+                "maturity_years": 5,
+                "payment_frequency": 2,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        results = response.json()["results"]
+        self.assertIn("present_value", results)
+        self.assertIn("macaulay_duration", results)
+        self.assertIn("modified_duration", results)
+        self.assertIn("convexity", results)
+
+    def test_bond_scenarios_api_returns_series(self) -> None:
+        response = self.client.post(
+            "/api/bonds/scenarios",
+            json={
+                "face_value": 10000,
+                "coupon_rate": 0.04,
+                "market_yield": 0.045,
+                "maturity_years": 5,
+                "payment_frequency": 2,
+                "min_rate_shock": -0.01,
+                "max_rate_shock": 0.01,
+                "steps": 5,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["series"]), 5)
+
 
 if __name__ == "__main__":
     unittest.main()
