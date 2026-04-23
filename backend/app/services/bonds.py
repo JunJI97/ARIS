@@ -102,16 +102,15 @@ def calculate_bond_valuation(
             ),
         ),
         interpretation=Interpretation(
-            label="Bond valuation",
+            label="채권 가치평가",
             summary=(
-                "Discounted coupon and principal cash flows are used to calculate "
-                "present value and interest-rate sensitivity."
+                "이자와 원금 현금흐름을 시장수익률로 할인해 현재가치와 금리 민감도를 계산했습니다."
             ),
             assumptions=[
-                "coupon_rate and market_yield are annual decimal rates.",
-                "Macaulay Duration is the weighted average cash-flow timing.",
-                "Modified Duration adjusts Macaulay Duration by periodic yield.",
-                "Convexity is calculated from discounted cash flows.",
+                "표면금리와 시장수익률은 연율 decimal 값입니다.",
+                "Macaulay Duration은 현금흐름 회수시점의 가중평균입니다.",
+                "Modified Duration은 주기 수익률 기준으로 보정한 1차 민감도입니다.",
+                "Convexity는 현금흐름 기반의 2차 민감도입니다.",
             ],
         ),
     )
@@ -121,7 +120,7 @@ def calculate_bond_scenarios(
     request: BondScenarioRequest,
 ) -> BondScenarioResponse:
     if request.min_rate_shock >= request.max_rate_shock:
-        raise ValueError("min_rate_shock must be lower than max_rate_shock")
+        raise ValueError("최소 금리 충격은 최대 금리 충격보다 작아야 합니다.")
 
     shock_interval = (request.max_rate_shock - request.min_rate_shock) / (
         request.steps - 1
@@ -155,14 +154,13 @@ def calculate_bond_scenarios(
         inputs=request,
         results={"base_price": _round_money(base_price)},
         interpretation=Interpretation(
-            label="Rate scenario",
+            label="금리 시나리오",
             summary=(
-                "Bond prices are recalculated across rate shocks. In general, "
-                "bond prices fall when market yields rise."
+                "금리 충격별로 채권 가격을 다시 계산했습니다. 일반적으로 시장수익률이 상승하면 채권 가격은 하락합니다."
             ),
             assumptions=[
-                "Each scenario changes only market_yield and keeps cash flows fixed.",
-                "Negative shocked yields are floored at zero for the MVP.",
+                "각 시나리오는 시장수익률만 변경하고 현금흐름은 동일하게 유지합니다.",
+                "음수 수익률 시나리오는 MVP에서 0으로 하한 처리합니다.",
             ],
         ),
         series=series,
