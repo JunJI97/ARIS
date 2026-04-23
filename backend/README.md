@@ -7,7 +7,7 @@ Minimal FastAPI backend.
 ```powershell
 cd C:\ARIS\ARIS\backend
 .\venv\Scripts\Activate.ps1
-uvicorn main:app --reload
+python -m uvicorn main:app --reload
 ```
 
 Then open:
