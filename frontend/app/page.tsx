@@ -17,7 +17,7 @@ import {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-type DashboardTab = "bond" | "project";
+type DashboardTab = "bond" | "credit" | "project";
 
 type Interpretation = {
   label: string;
@@ -75,6 +75,32 @@ type BondScenarioResponse = {
   series: BondScenarioPoint[];
 };
 
+type CreditRiskForm = {
+  debt_ratio: number;
+  current_ratio: number;
+  interest_coverage_ratio: number;
+  operating_margin: number;
+};
+
+type CreditRiskFactorContribution = {
+  factor: string;
+  input_value: number;
+  factor_score: number;
+  contribution: number;
+  assessment: string;
+};
+
+type CreditRiskResponse = {
+  results: {
+    score: number;
+    grade: "Normal" | "Watch" | "Default";
+    strongest_factor: string;
+    weakest_factor: string;
+  };
+  interpretation: Interpretation;
+  series: CreditRiskFactorContribution[];
+};
+
 type ProjectForm = {
   initial_investment: number;
   discount_rate: number;
@@ -108,6 +134,13 @@ const fallbackBondForm: BondForm = {
   min_rate_shock: -0.02,
   max_rate_shock: 0.02,
   steps: 9,
+};
+
+const fallbackCreditForm: CreditRiskForm = {
+  debt_ratio: 0.55,
+  current_ratio: 1.35,
+  interest_coverage_ratio: 3.2,
+  operating_margin: 0.08,
 };
 
 const fallbackProjectForm: ProjectForm = {
@@ -168,6 +201,25 @@ function validateBondForm(form: BondForm): string | null {
   return null;
 }
 
+function validateCreditRiskForm(form: CreditRiskForm): string | null {
+  if (form.debt_ratio < 0 || form.debt_ratio > 2) {
+    return "부채비율은 0 이상 2 이하로 입력해야 합니다.";
+  }
+  if (form.current_ratio < 0 || form.current_ratio > 10) {
+    return "유동비율은 0 이상 10 이하로 입력해야 합니다.";
+  }
+  if (
+    form.interest_coverage_ratio < 0 ||
+    form.interest_coverage_ratio > 50
+  ) {
+    return "이자보상배율은 0 이상 50 이하로 입력해야 합니다.";
+  }
+  if (form.operating_margin < -1 || form.operating_margin > 1) {
+    return "영업이익률은 -1 이상 1 이하의 decimal 값이어야 합니다.";
+  }
+  return null;
+}
+
 function validateProjectForm(form: ProjectForm): string | null {
   if (form.initial_investment <= 0) return "초기 투자금은 0보다 커야 합니다.";
   if (form.discount_rate < 0) return "할인율은 음수일 수 없습니다.";
@@ -198,20 +250,52 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function gradeLabel(grade: "Normal" | "Watch" | "Default") {
+  if (grade === "Normal") return "정상";
+  if (grade === "Watch") return "관찰";
+  return "부실 위험";
+}
+
+function gradeTone(grade: "Normal" | "Watch" | "Default") {
+  if (grade === "Normal") {
+    return {
+      badge: "bg-[#e6f4ea] text-[#1b6b3a]",
+      panel: "border-[#cfe8d6] bg-[#f4fbf6]",
+    };
+  }
+  if (grade === "Watch") {
+    return {
+      badge: "bg-[#fff4d6] text-[#8a5a00]",
+      panel: "border-[#f0d58a] bg-[#fffaf0]",
+    };
+  }
+  return {
+    badge: "bg-[#fde8e6] text-[#a1261a]",
+    panel: "border-[#f0b4a7] bg-[#fff5f3]",
+  };
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("bond");
   const [instruments, setInstruments] = useState<BondInstrument[]>([]);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
   const [bondForm, setBondForm] = useState<BondForm>(fallbackBondForm);
+  const [creditForm, setCreditForm] =
+    useState<CreditRiskForm>(fallbackCreditForm);
   const [projectForm, setProjectForm] =
     useState<ProjectForm>(fallbackProjectForm);
   const [valuation, setValuation] = useState<BondValuationResponse | null>(null);
   const [scenario, setScenario] = useState<BondScenarioResponse | null>(null);
+  const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
+    null,
+  );
   const [projectResult, setProjectResult] =
     useState<ProjectFeasibilityResponse | null>(null);
   const [bondLoading, setBondLoading] = useState(false);
+  const [creditLoading, setCreditLoading] = useState(false);
   const [projectLoading, setProjectLoading] = useState(false);
   const [bondError, setBondError] = useState<string | null>(null);
+  const [creditError, setCreditError] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [bondWarning, setBondWarning] = useState<string | null>(null);
 
@@ -227,6 +311,10 @@ export default function Home() {
     if (!valuation) return null;
     return valuation.results.present_value - bondForm.face_value;
   }, [bondForm.face_value, valuation]);
+
+  const creditTone = creditResult
+    ? gradeTone(creditResult.results.grade)
+    : gradeTone("Watch");
 
   const projectDecisionSummary = useMemo(() => {
     if (!projectResult) return "분석을 실행하면 투자 타당성 판단 포인트를 요약해 드립니다.";
@@ -373,6 +461,32 @@ export default function Home() {
     }
   }
 
+  async function handleCreditCalculate() {
+    const validationMessage = validateCreditRiskForm(creditForm);
+    if (validationMessage) {
+      setCreditError(validationMessage);
+      return;
+    }
+
+    setCreditLoading(true);
+    setCreditError(null);
+
+    try {
+      const result = await fetchJson<CreditRiskResponse>("/api/credit-risk/score", {
+        method: "POST",
+        body: JSON.stringify(creditForm),
+      });
+
+      setCreditResult(result);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
+      setCreditError(`신용위험 분석에 실패했습니다. ${message}`);
+    } finally {
+      setCreditLoading(false);
+    }
+  }
+
   async function handleProjectCalculate() {
     const validationMessage = validateProjectForm(projectForm);
     if (validationMessage) {
@@ -415,6 +529,13 @@ export default function Home() {
     }));
   }
 
+  function updateCreditForm(key: keyof CreditRiskForm, value: string) {
+    setCreditForm((current) => ({
+      ...current,
+      [key]: Number(value),
+    }));
+  }
+
   function updateProjectForm(key: keyof ProjectForm, value: string) {
     setProjectForm((current) => ({
       ...current,
@@ -434,7 +555,7 @@ export default function Home() {
               ARIS 금융 분석 대시보드
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#5b6675]">
-              채권 가치평가와 프로젝트 사업성 분석을 같은 화면에서 확인하고,
+              채권 가치평가, 신용위험, 프로젝트 사업성 분석을 한 화면에서 확인하고,
               백엔드 계산 결과를 바로 검증할 수 있습니다.
             </p>
           </div>
@@ -444,7 +565,11 @@ export default function Home() {
               label="채권"
               onClick={() => setActiveTab("bond")}
             />
-            <span className="px-3 py-2 text-[#7a8492]">자산 확장 예정</span>
+            <TabButton
+              active={activeTab === "credit"}
+              label="신용위험"
+              onClick={() => setActiveTab("credit")}
+            />
             <TabButton
               active={activeTab === "project"}
               label="프로젝트"
@@ -760,6 +885,204 @@ export default function Home() {
               </div>
             </section>
           </section>
+        ) : activeTab === "credit" ? (
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">신용위험 입력</h2>
+                {creditResult ? (
+                  <span
+                    className={`rounded px-2 py-1 text-xs font-semibold ${creditTone.badge}`}
+                  >
+                    {gradeLabel(creditResult.results.grade)}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[#5b6675]">
+                핵심 재무비율을 입력하면 가중치 기반 점수와 Normal / Watch /
+                Default 등급을 계산합니다.
+              </p>
+
+              <div className="mt-5 grid gap-4">
+                <NumberField
+                  label="부채비율"
+                  suffix="decimal"
+                  step="0.01"
+                  value={creditForm.debt_ratio}
+                  onChange={(value) => updateCreditForm("debt_ratio", value)}
+                />
+                <NumberField
+                  label="유동비율"
+                  suffix="배"
+                  step="0.01"
+                  value={creditForm.current_ratio}
+                  onChange={(value) => updateCreditForm("current_ratio", value)}
+                />
+                <NumberField
+                  label="이자보상배율"
+                  suffix="배"
+                  step="0.1"
+                  value={creditForm.interest_coverage_ratio}
+                  onChange={(value) =>
+                    updateCreditForm("interest_coverage_ratio", value)
+                  }
+                />
+                <NumberField
+                  label="영업이익률"
+                  suffix="decimal"
+                  step="0.01"
+                  value={creditForm.operating_margin}
+                  onChange={(value) =>
+                    updateCreditForm("operating_margin", value)
+                  }
+                />
+              </div>
+
+              <div className="mt-4 rounded border border-[#e5e7eb] bg-[#f9fafb] p-3 text-xs leading-5 text-[#5b6675]">
+                <div>부채비율은 낮을수록 유리합니다.</div>
+                <div>유동비율, 이자보상배율, 영업이익률은 높을수록 유리합니다.</div>
+                <div>이 모델은 설명 가능한 MVP용 단순 가중치 모델입니다.</div>
+              </div>
+
+              <button
+                className="mt-5 w-full rounded bg-[#1f6feb] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                disabled={creditLoading}
+                onClick={handleCreditCalculate}
+              >
+                {creditLoading ? "계산 중..." : "신용위험 점수 계산"}
+              </button>
+
+              {creditError ? (
+                <AlertBox tone="error">{creditError}</AlertBox>
+              ) : null}
+            </aside>
+
+            <section className="flex flex-col gap-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <MetricCard
+                  label="신용위험 점수"
+                  value={
+                    creditResult
+                      ? `${formatNumber(creditResult.results.score, 2)} 점`
+                      : "-"
+                  }
+                  hint="0점에서 100점 사이의 단순 가중치 점수"
+                />
+                <MetricCard
+                  label="등급"
+                  value={
+                    creditResult
+                      ? gradeLabel(creditResult.results.grade)
+                      : "-"
+                  }
+                  hint="Normal / Watch / Default를 한국어로 표시"
+                />
+                <MetricCard
+                  label="강점 요인"
+                  value={creditResult?.results.strongest_factor ?? "-"}
+                  hint="점수에 가장 크게 기여한 항목"
+                />
+                <MetricCard
+                  label="취약 요인"
+                  value={creditResult?.results.weakest_factor ?? "-"}
+                  hint="점수를 가장 많이 깎아먹은 항목"
+                />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold">요인별 기여도</h2>
+                      <p className="mt-1 text-sm text-[#6b7280]">
+                        각 재무비율이 신용위험 점수에 얼마나 기여했는지 확인합니다.
+                      </p>
+                    </div>
+                    {creditResult ? (
+                      <div
+                        className={`rounded border px-3 py-2 text-sm font-semibold ${creditTone.panel}`}
+                      >
+                        {gradeLabel(creditResult.results.grade)}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-5 h-80">
+                    {creditResult ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={creditResult.series}
+                          margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
+                        >
+                          <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                          <XAxis
+                            dataKey="factor"
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                          />
+                          <YAxis
+                            tick={{ fill: "#5b6675", fontSize: 12 }}
+                            width={78}
+                          />
+                          <Tooltip
+                            formatter={(value, key) => {
+                              if (key === "contribution") {
+                                return [`${formatNumber(Number(value), 2)} 점`, "기여도"];
+                              }
+                              if (key === "factor_score") {
+                                return [`${formatNumber(Number(value), 2)} 점`, "요인 점수"];
+                              }
+                              return [value, key];
+                            }}
+                          />
+                          <Bar
+                            dataKey="contribution"
+                            fill="#1f6feb"
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyChart message="계산을 실행하면 요인별 기여도 차트가 표시됩니다." />
+                    )}
+                  </div>
+                </div>
+
+                <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+                  <h2 className="text-lg font-semibold">비율 요약</h2>
+                  <div className="mt-4 space-y-3 text-sm text-[#4b5563]">
+                    <SummaryRow
+                      label="부채비율"
+                      value={formatNumber(creditForm.debt_ratio, 2)}
+                    />
+                    <SummaryRow
+                      label="유동비율"
+                      value={`${formatNumber(creditForm.current_ratio, 2)} 배`}
+                    />
+                    <SummaryRow
+                      label="이자보상배율"
+                      value={`${formatNumber(creditForm.interest_coverage_ratio, 2)} 배`}
+                    />
+                    <SummaryRow
+                      label="영업이익률"
+                      value={formatPercent(creditForm.operating_margin, 2)}
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <InterpretationPanel
+                  title="결과 해석"
+                  summary={
+                    creditResult?.interpretation.summary ??
+                    "계산을 실행하면 신용위험 등급과 설명 문구가 표시됩니다."
+                  }
+                  assumptions={creditResult?.interpretation.assumptions ?? []}
+                />
+                <FactorPanel factors={creditResult?.series ?? []} />
+              </div>
+            </section>
+          </section>
         ) : (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
             <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
@@ -1056,6 +1379,36 @@ function InterpretationPanel({
           ))}
         </ul>
       ) : null}
+    </section>
+  );
+}
+
+function FactorPanel({ factors }: { factors: CreditRiskFactorContribution[] }) {
+  return (
+    <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-semibold">주요 요인 해설</h2>
+      {factors.length > 0 ? (
+        <ul className="mt-4 space-y-3 text-sm text-[#4b5563]">
+          {factors.map((factor) => (
+            <li
+              key={factor.factor}
+              className="rounded border border-[#e5e7eb] bg-[#fafbfc] p-3"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-semibold text-[#18202a]">{factor.factor}</span>
+                <span className="text-xs text-[#6b7280]">
+                  기여도 {formatNumber(factor.contribution, 2)}점
+                </span>
+              </div>
+              <p className="mt-2 leading-6">{factor.assessment}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm leading-6 text-[#5b6675]">
+          계산을 실행하면 어떤 비율이 점수에 영향을 주었는지 설명이 표시됩니다.
+        </p>
+      )}
     </section>
   );
 }
