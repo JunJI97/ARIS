@@ -1,0 +1,22 @@
+{
+  "mode": "initial_scan",
+  "scan_level": "quick",
+  "current_step": "complete",
+  "completed_steps": [
+    "load-bmad-config",
+    "scan-current-structure",
+    "classify-project",
+    "generate-documentation"
+  ],
+  "project_classification": {
+    "repository_type": "full-stack",
+    "project_types": ["nextjs-frontend", "fastapi-backend", "financial-analytics-mvp"],
+    "architecture": "Next.js frontend + FastAPI backend"
+  },
+  "last_updated": "2026-04-23T18:40:00+09:00",
+  "notes": [
+    "Frontend is currently a create-next-app starter page.",
+    "Backend currently exposes root and health endpoints only.",
+    "User-provided ARIS MVP requirements were used as target context."
+  ]
+}

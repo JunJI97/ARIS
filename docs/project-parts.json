@@ -1,0 +1,29 @@
+{
+  "projectName": "ARIS",
+  "updatedAt": "2026-04-23",
+  "repositoryType": "full-stack",
+  "parts": [
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "path": "frontend",
+      "type": "nextjs-app",
+      "entryPoint": "frontend/app/page.tsx",
+      "stack": ["Next.js", "React", "TypeScript", "Tailwind CSS", "Recharts", "Zustand"]
+    },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "path": "backend",
+      "type": "fastapi-service",
+      "entryPoint": "backend/main.py",
+      "stack": ["Python", "FastAPI", "Uvicorn"]
+    }
+  ],
+  "plannedDomains": [
+    "fixed-income",
+    "credit-risk",
+    "project-feasibility",
+    "market-risk"
+  ]
+}
