@@ -24,6 +24,20 @@ cd C:\ARIS\ARIS\backend
 python -m unittest discover
 ```
 
+## Market Data
+
+Stock search uses Yahoo Finance chart/search endpoints for price, exchange, and
+currency. Fundamentals can be enriched with Alpha Vantage when an API key is
+available:
+
+```powershell
+$env:ALPHAVANTAGE_API_KEY="your-api-key"
+python -m uvicorn main:app --reload
+```
+
+Without `ALPHAVANTAGE_API_KEY`, ARIS keeps using conservative placeholder
+fundamentals and marks that assumption in the API response.
+
 ## Notes
 
 - Use `.venv314` for the current local environment.
