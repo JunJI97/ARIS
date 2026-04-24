@@ -16,6 +16,8 @@ import {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const TRADING_DAYS_PER_MONTH = 21;
+const TRADING_DAYS_PER_YEAR = 252;
 
 type DashboardTab =
   | "bond"
@@ -25,22 +27,13 @@ type DashboardTab =
   | "project"
   | "market";
 type AssetTypeKey = "bond" | "stock";
+type SearchDrawerType = "bond" | "stock";
+type PortfolioPeriodUnit = "days" | "months" | "years";
 
 type Interpretation = {
   label: string;
   summary: string;
   assumptions: string[];
-};
-
-type AssetTypeInfo = {
-  asset_type: AssetTypeKey;
-  label: string;
-  status: "enabled" | "planned" | "disabled";
-  description: string;
-};
-
-type AssetTypesResponse = {
-  asset_types: AssetTypeInfo[];
 };
 
 type BondInstrument = {
@@ -601,10 +594,27 @@ function gradeTone(grade: "Normal" | "Watch" | "Default") {
   };
 }
 
+function periodValueFromDays(days: number, unit: PortfolioPeriodUnit) {
+  if (unit === "months") return days / TRADING_DAYS_PER_MONTH;
+  if (unit === "years") return days / TRADING_DAYS_PER_YEAR;
+  return days;
+}
+
+function periodDaysFromValue(value: number, unit: PortfolioPeriodUnit) {
+  if (!Number.isFinite(value)) return 0;
+  if (unit === "months") return Math.round(value * TRADING_DAYS_PER_MONTH);
+  if (unit === "years") return Math.round(value * TRADING_DAYS_PER_YEAR);
+  return Math.round(value);
+}
+
+function periodStep(unit: PortfolioPeriodUnit) {
+  if (unit === "years") return "0.1";
+  return "1";
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("bond");
-  const [assetTypes, setAssetTypes] = useState<AssetTypeInfo[]>([]);
-  const [assetTypeError, setAssetTypeError] = useState<string | null>(null);
+  const [searchDrawer, setSearchDrawer] = useState<SearchDrawerType | null>(null);
   const [instruments, setInstruments] = useState<BondInstrument[]>([]);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
   const [bondSearchQuery, setBondSearchQuery] = useState("treasury");
@@ -622,6 +632,8 @@ export default function Home() {
     useState<PortfolioRiskForm>({
       holding_period_days: 10,
     });
+  const [portfolioPeriodUnit, setPortfolioPeriodUnit] =
+    useState<PortfolioPeriodUnit>("days");
   const [bondForm, setBondForm] = useState<BondForm>(fallbackBondForm);
   const [stockForm, setStockForm] = useState<StockForm>(fallbackStockForm);
   const [creditForm, setCreditForm] =
@@ -693,10 +705,6 @@ export default function Home() {
   const creditTone = creditResult
     ? gradeTone(creditResult.results.grade)
     : gradeTone("Watch");
-
-  const enabledAssetCount = assetTypes.filter(
-    (assetType) => assetType.status === "enabled",
-  ).length;
 
   const portfolioStockHoldings = useMemo(
     () =>
@@ -793,16 +801,6 @@ export default function Home() {
 
   useEffect(() => {
     let mounted = true;
-
-    fetchJson<AssetTypesResponse>("/api/assets/types")
-      .then((payload) => {
-        if (mounted) setAssetTypes(payload.asset_types);
-      })
-      .catch((caught: Error) => {
-        if (mounted) {
-          setAssetTypeError(`자산군 정보를 불러오지 못했습니다. ${caught.message}`);
-        }
-      });
 
     Promise.all([
       fetchJson<{ instruments: BondInstrument[] }>("/api/bonds/instruments"),
@@ -916,6 +914,7 @@ export default function Home() {
         `/api/bonds/search?query=${encodeURIComponent(query)}`,
       );
       setBondSearchResults(payload.instruments);
+      setSearchDrawer("bond");
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
@@ -937,6 +936,7 @@ export default function Home() {
       return [instrument, ...current];
     });
     handleSelectInstrument(instrument.instrument_id);
+    setSearchDrawer(null);
   }
 
   async function handleSelectInstrument(instrumentId: string) {
@@ -1031,6 +1031,7 @@ export default function Home() {
         `/api/stocks/search?query=${encodeURIComponent(query)}`,
       );
       setStockSearchResults(payload.instruments);
+      setSearchDrawer("stock");
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
@@ -1052,6 +1053,7 @@ export default function Home() {
       return [instrument, ...current];
     });
     handleSelectStockInstrument(instrument.instrument_id);
+    setSearchDrawer(null);
   }
 
   async function handleSelectStockInstrument(instrumentId: string) {
@@ -1154,7 +1156,9 @@ export default function Home() {
       portfolioRiskForm.holding_period_days < 1 ||
       portfolioRiskForm.holding_period_days > 252
     ) {
-      setPortfolioError("보유기간은 1일 이상 252일 이하여야 합니다.");
+      setPortfolioError(
+        "보유기간은 1~252거래일 범위여야 합니다. 월/년 입력은 거래일 기준으로 환산됩니다.",
+      );
       return;
     }
 
@@ -1377,15 +1381,17 @@ export default function Home() {
     setPortfolioAnalysis(null);
   }
 
-  function updatePortfolioRiskForm(
-    key: keyof PortfolioRiskForm,
-    value: string,
-  ) {
+  function updatePortfolioHoldingPeriod(value: string) {
+    const days = periodDaysFromValue(Number(value), portfolioPeriodUnit);
     setPortfolioRiskForm((current) => ({
       ...current,
-      [key]: Number(value),
+      holding_period_days: days,
     }));
     setPortfolioAnalysis(null);
+  }
+
+  function updatePortfolioPeriodUnit(unit: PortfolioPeriodUnit) {
+    setPortfolioPeriodUnit(unit);
   }
 
   function updateCreditForm(key: keyof CreditRiskForm, value: string) {
@@ -1438,21 +1444,11 @@ export default function Home() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-[#18202a]">
-                지원 분석
+                계산 상태
               </span>
-              <span className="rounded bg-[#eaf2ff] px-2.5 py-1 text-xs font-semibold text-[#1f4f8f]">
-                사용 가능 자산군 {enabledAssetCount}개
+              <span className="text-xs text-[#6b7280]">
+                실행한 분석만 준비 상태로 표시됩니다.
               </span>
-              <span className="rounded bg-[#eef2f7] px-2.5 py-1 text-xs font-semibold text-[#5b6675]">
-                자산군 확장 준비됨
-              </span>
-              {assetTypeError ? (
-                <span className="text-xs text-[#9f2f1f]">{assetTypeError}</span>
-              ) : (
-                assetTypes.map((assetType) => (
-                  <AssetTypePill key={assetType.asset_type} assetType={assetType} />
-                ))
-              )}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -1542,37 +1538,13 @@ export default function Home() {
               </label>
 
               {bondSearchResults.length > 0 ? (
-                <div className="mt-4 rounded border border-[#e5e7eb] bg-[#fbfcfe]">
-                  <div className="border-b border-[#eef1f5] px-3 py-2 text-xs font-semibold text-[#5b6675]">
-                    검색 후보 {bondSearchResults.length}개
-                  </div>
-                  <div className="divide-y divide-[#eef1f5]">
-                    {bondSearchResults.map((instrument) => (
-                      <div
-                        className="grid gap-3 px-3 py-3 text-sm sm:grid-cols-[1fr_auto]"
-                        key={instrument.instrument_id}
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate font-semibold text-[#111827]">
-                            {instrument.name}
-                          </div>
-                          <div className="mt-1 text-xs leading-5 text-[#6b7280]">
-                            {instrument.issuer} · {instrument.currency} ·{" "}
-                            {formatNumber(instrument.maturity_years, 1)}Y ·{" "}
-                            {formatPercent(instrument.market_yield)}
-                          </div>
-                        </div>
-                        <button
-                          className="rounded border border-[#1f6feb] px-3 py-1.5 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
-                          onClick={() => applyBondSearchResult(instrument)}
-                          type="button"
-                        >
-                          적용
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <button
+                  className="mt-3 w-full rounded border border-[#1f6feb] bg-[#eff6ff] px-3 py-2 text-sm font-semibold text-[#1f4f8f] transition hover:bg-[#dbeafe]"
+                  onClick={() => setSearchDrawer("bond")}
+                  type="button"
+                >
+                  검색 후보 {bondSearchResults.length}개 보기
+                </button>
               ) : null}
 
               <label className="mt-4 block text-sm font-medium text-[#384252]">
@@ -1908,36 +1880,13 @@ export default function Home() {
               </label>
 
               {stockSearchResults.length > 0 ? (
-                <div className="mt-4 rounded border border-[#e5e7eb] bg-[#fbfcfe]">
-                  <div className="border-b border-[#eef1f5] px-3 py-2 text-xs font-semibold text-[#5b6675]">
-                    검색 후보 {stockSearchResults.length}개
-                  </div>
-                  <div className="divide-y divide-[#eef1f5]">
-                    {stockSearchResults.map((instrument) => (
-                      <div
-                        className="grid gap-3 px-3 py-3 text-sm sm:grid-cols-[1fr_auto]"
-                        key={instrument.instrument_id}
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate font-semibold text-[#111827]">
-                            {instrument.ticker} · {instrument.name}
-                          </div>
-                          <div className="mt-1 text-xs leading-5 text-[#6b7280]">
-                            {instrument.exchange} · {instrument.currency} ·{" "}
-                            {formatMoney(instrument.last_price, 2)}
-                          </div>
-                        </div>
-                        <button
-                          className="rounded border border-[#1f6feb] px-3 py-1.5 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
-                          onClick={() => applyStockSearchResult(instrument)}
-                          type="button"
-                        >
-                          적용
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <button
+                  className="mt-3 w-full rounded border border-[#1f6feb] bg-[#eff6ff] px-3 py-2 text-sm font-semibold text-[#1f4f8f] transition hover:bg-[#dbeafe]"
+                  onClick={() => setSearchDrawer("stock")}
+                  type="button"
+                >
+                  검색 후보 {stockSearchResults.length}개 보기
+                </button>
               ) : null}
 
               <label className="mt-4 block text-sm font-medium text-[#384252]">
@@ -2400,15 +2349,42 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <NumberField
-                    label="보유기간"
-                    onChange={(value) =>
-                      updatePortfolioRiskForm("holding_period_days", value)
-                    }
-                    step="1"
-                    suffix="일"
-                    value={portfolioRiskForm.holding_period_days}
-                  />
+                  <label className="block text-sm font-medium text-[#384252]">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>보유기간</span>
+                      <span className="text-xs text-[#7a8492]">
+                        {portfolioRiskForm.holding_period_days}거래일
+                      </span>
+                    </div>
+                    <input
+                      className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHoldingPeriod(event.target.value)
+                      }
+                      step={periodStep(portfolioPeriodUnit)}
+                      type="number"
+                      value={periodValueFromDays(
+                        portfolioRiskForm.holding_period_days,
+                        portfolioPeriodUnit,
+                      )}
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-[#384252]">
+                    <span>단위</span>
+                    <select
+                      className="mt-2 h-10 rounded border border-[#cfd6e0] bg-white px-3 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioPeriodUnit(
+                          event.target.value as PortfolioPeriodUnit,
+                        )
+                      }
+                      value={portfolioPeriodUnit}
+                    >
+                      <option value="days">일</option>
+                      <option value="months">개월</option>
+                      <option value="years">년</option>
+                    </select>
+                  </label>
                   <button
                     className="h-10 rounded bg-[#1f6feb] px-4 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
                     disabled={portfolioLoading}
@@ -2418,6 +2394,21 @@ export default function Home() {
                     {portfolioLoading ? "계산 중..." : "계산"}
                   </button>
                 </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <InfoNote
+                  title="시장위험과 연결"
+                  body="포트폴리오의 평가금액, 기대수익률, 변동성은 VaR와 집중도 계산에 직접 사용됩니다."
+                />
+                <InfoNote
+                  title="신용위험은 별도 입력"
+                  body="신용위험은 기업 재무비율 기반 점수입니다. 보유 종목을 참고할 수 있지만 자동 산출 입력은 아닙니다."
+                />
+                <InfoNote
+                  title="프로젝트는 별도 판단"
+                  body="프로젝트 분석은 현금흐름과 할인율로 사업성을 봅니다. 포트폴리오와는 의사결정 관점만 이어집니다."
+                />
               </div>
 
               {portfolioError ? (
@@ -3191,8 +3182,128 @@ export default function Home() {
             </section>
           </section>
         )}
+
+        <SearchResultsDrawer
+          isOpen={searchDrawer === "bond"}
+          onClose={() => setSearchDrawer(null)}
+          title="채권 검색 후보"
+        >
+          {bondSearchResults.length === 0 ? (
+            <p className="text-sm text-[#6b7280]">검색 후보가 없습니다.</p>
+          ) : (
+            <div className="divide-y divide-[#eef1f5]">
+              {bondSearchResults.map((instrument) => (
+                <div
+                  className="grid gap-3 py-4 text-sm sm:grid-cols-[1fr_auto]"
+                  key={instrument.instrument_id}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold text-[#111827]">
+                      {instrument.name}
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-[#6b7280]">
+                      {instrument.issuer} · {instrument.currency} ·{" "}
+                      {formatNumber(instrument.maturity_years, 1)}Y ·{" "}
+                      {formatPercent(instrument.market_yield)}
+                    </div>
+                  </div>
+                  <button
+                    className="h-9 rounded border border-[#1f6feb] px-3 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                    onClick={() => applyBondSearchResult(instrument)}
+                    type="button"
+                  >
+                    적용
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </SearchResultsDrawer>
+
+        <SearchResultsDrawer
+          isOpen={searchDrawer === "stock"}
+          onClose={() => setSearchDrawer(null)}
+          title="주식 검색 후보"
+        >
+          {stockSearchResults.length === 0 ? (
+            <p className="text-sm text-[#6b7280]">검색 후보가 없습니다.</p>
+          ) : (
+            <div className="divide-y divide-[#eef1f5]">
+              {stockSearchResults.map((instrument) => (
+                <div
+                  className="grid gap-3 py-4 text-sm sm:grid-cols-[1fr_auto]"
+                  key={instrument.instrument_id}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold text-[#111827]">
+                      {instrument.ticker} · {instrument.name}
+                    </div>
+                    <div className="mt-1 text-xs leading-5 text-[#6b7280]">
+                      {instrument.exchange} · {instrument.currency} ·{" "}
+                      {formatMoney(instrument.last_price, 2)}
+                    </div>
+                  </div>
+                  <button
+                    className="h-9 rounded border border-[#1f6feb] px-3 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                    onClick={() => applyStockSearchResult(instrument)}
+                    type="button"
+                  >
+                    적용
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </SearchResultsDrawer>
       </div>
     </main>
+  );
+}
+
+function SearchResultsDrawer({
+  isOpen,
+  title,
+  children,
+  onClose,
+}: {
+  isOpen: boolean;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+      <button
+        aria-label="검색 후보 닫기"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+        type="button"
+      />
+      <section className="relative h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-[#eef1f5] pb-3">
+          <h2 className="text-lg font-semibold text-[#111827]">{title}</h2>
+          <button
+            className="rounded border border-[#d9dee7] px-3 py-1.5 text-sm font-semibold text-[#384252] transition hover:border-[#1f6feb] hover:text-[#1f6feb]"
+            onClick={onClose}
+            type="button"
+          >
+            닫기
+          </button>
+        </div>
+        <div className="mt-2">{children}</div>
+      </section>
+    </div>
+  );
+}
+
+function InfoNote({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded border border-[#d9dee7] bg-[#fbfcfe] p-3">
+      <p className="text-sm font-semibold text-[#18202a]">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-[#6b7280]">{body}</p>
+    </div>
   );
 }
 
@@ -3474,21 +3585,6 @@ function StatusChip({
       <span className="text-xs font-semibold text-[#18202a]">{label}</span>
       <span className="text-xs text-[#6b7280]">{detail}</span>
     </div>
-  );
-}
-
-function AssetTypePill({ assetType }: { assetType: AssetTypeInfo }) {
-  const tone =
-    assetType.status === "enabled"
-      ? "bg-[#e6f4ea] text-[#1b6b3a]"
-      : assetType.status === "planned"
-        ? "bg-[#eef2f7] text-[#5b6675]"
-        : "bg-[#fde8e6] text-[#a1261a]";
-
-  return (
-    <span className={`rounded px-2.5 py-1 text-xs font-semibold ${tone}`}>
-      {assetType.label} {assetType.status}
-    </span>
   );
 }
 
