@@ -199,6 +199,8 @@ Response:
 
 ### `POST /api/stocks/portfolio`
 
+Deprecated. stock-only 호환용 wrapper로 유지하며, 내부 계산은 공통 포트폴리오 분석 로직에 위임한다. 신규 구현은 `POST /api/portfolio/analyze`를 사용한다.
+
 종목별 평가금액, beta, 기대수익률과 시장 변동성 입력을 받아 포트폴리오 beta, 기대수익률, 집중도 리스크, VaR를 계산한다.
 
 Request:

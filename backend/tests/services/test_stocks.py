@@ -141,9 +141,10 @@ class StockServiceTest(unittest.TestCase):
         self.assertEqual(result.results.expected_return, 0.084)
         self.assertEqual(result.results.largest_weight, 0.6)
         self.assertEqual(result.results.concentration_level, "high")
-        self.assertEqual(result.results.estimated_volatility, 0.208)
+        self.assertGreater(result.results.estimated_volatility, 0)
         self.assertGreater(result.results.var_95, 0)
         self.assertGreater(result.results.var_99, result.results.var_95)
+        self.assertIn("deprecated", result.interpretation.label)
         self.assertEqual(len(result.series), 2)
 
 

@@ -140,6 +140,7 @@ class StocksApiTest(unittest.TestCase):
         self.assertEqual(results["expected_return"], 0.084)
         self.assertIn("var_95", results)
         self.assertIn("var_99", results)
+        self.assertIn("deprecated", response.json()["interpretation"]["label"])
         self.assertEqual(len(response.json()["series"]), 2)
 
 

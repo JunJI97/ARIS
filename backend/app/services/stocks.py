@@ -1,11 +1,8 @@
-from math import sqrt
-
 from app.schemas.bonds import Interpretation
+from app.schemas.portfolio import PortfolioAnalyzeRequest, PortfolioHoldingRequest
 from app.schemas.stocks import (
-    StockPortfolioHoldingResult,
     StockPortfolioRequest,
     StockPortfolioResponse,
-    StockPortfolioResults,
     StockScenarioPoint,
     StockScenarioRequest,
     StockScenarioResponse,
@@ -13,6 +10,7 @@ from app.schemas.stocks import (
     StockValuationResponse,
     StockValuationResults,
 )
+from app.services.portfolio import analyze_portfolio
 
 
 def _round_money(value: float) -> float:
@@ -219,90 +217,73 @@ def calculate_stock_scenarios(
     )
 
 
-def _classify_concentration(largest_weight: float, hhi: float) -> str:
-    if largest_weight >= 0.5 or hhi >= 0.35:
-        return "high"
-    if largest_weight >= 0.35 or hhi >= 0.25:
-        return "watch"
-    return "diversified"
-
-
-TRADING_DAYS_PER_YEAR = 252
-Z_SCORE_95 = 1.6449
-Z_SCORE_99 = 2.3263
-
-
 def calculate_stock_portfolio(
     request: StockPortfolioRequest,
 ) -> StockPortfolioResponse:
-    total_market_value = sum(holding.market_value for holding in request.holdings)
-    series: list[StockPortfolioHoldingResult] = []
-
-    portfolio_beta = 0.0
-    expected_return = 0.0
-    hhi = 0.0
-    largest_weight = 0.0
-
-    for holding in request.holdings:
-        weight = holding.market_value / total_market_value
-        contribution_to_beta = weight * holding.beta
-        contribution_to_return = weight * holding.expected_return
-        portfolio_beta += contribution_to_beta
-        expected_return += contribution_to_return
-        hhi += weight**2
-        largest_weight = max(largest_weight, weight)
-
-        series.append(
-            StockPortfolioHoldingResult(
-                ticker=holding.ticker,
-                name=holding.name,
-                market_value=_round_money(holding.market_value),
-                weight=_round_metric(weight),
-                beta=_round_metric(holding.beta),
-                expected_return=_round_metric(holding.expected_return),
-                contribution_to_beta=_round_metric(contribution_to_beta),
-                contribution_to_return=_round_metric(contribution_to_return),
-            )
-        )
-
-    concentration_level = _classify_concentration(largest_weight, hhi)
-    estimated_volatility = portfolio_beta * request.market_volatility
-    holding_period_volatility = estimated_volatility * sqrt(
-        request.holding_period_days / TRADING_DAYS_PER_YEAR
-    )
-    loss_percent_95 = holding_period_volatility * Z_SCORE_95
-    loss_percent_99 = holding_period_volatility * Z_SCORE_99
-    var_95 = total_market_value * loss_percent_95
-    var_99 = total_market_value * loss_percent_99
-
-    return StockPortfolioResponse(
-        inputs=request,
-        results=StockPortfolioResults(
-            total_market_value=_round_money(total_market_value),
-            portfolio_beta=_round_metric(portfolio_beta),
-            expected_return=_round_metric(expected_return),
-            largest_weight=_round_metric(largest_weight),
-            hhi=_round_metric(hhi),
-            concentration_level=concentration_level,
-            estimated_volatility=_round_metric(estimated_volatility),
-            holding_period_volatility=_round_metric(holding_period_volatility),
-            var_95=_round_money(var_95),
-            var_99=_round_money(var_99),
-            loss_percent_95=_round_metric(loss_percent_95),
-            loss_percent_99=_round_metric(loss_percent_99),
-        ),
-        interpretation=Interpretation(
-            label="주식 포트폴리오",
-            summary=(
-                "종목별 평가금액 비중으로 포트폴리오 beta, 기대수익률, 집중도 리스크, 추정 VaR를 계산합니다."
-            ),
-            assumptions=[
-                "각 종목의 beta와 기대수익률은 입력값을 그대로 사용합니다.",
-                "HHI는 종목 비중 제곱합으로 계산합니다.",
-                "최대 비중 또는 HHI가 높으면 집중도 리스크가 높게 분류됩니다.",
-                "포트폴리오 변동성은 portfolio beta와 시장 변동성의 곱으로 추정합니다.",
-                "VaR는 정규분포 z-score와 보유기간 변동성을 사용하는 단순 parametric 방식입니다.",
+    portfolio_response = analyze_portfolio(
+        PortfolioAnalyzeRequest(
+            holdings=[
+                PortfolioHoldingRequest(
+                    asset_type="stock",
+                    instrument_id=holding.ticker,
+                    name=holding.name,
+                    market_value=holding.market_value,
+                    expected_return=holding.expected_return,
+                    volatility=request.market_volatility,
+                    beta=holding.beta,
+                )
+                for holding in request.holdings
             ],
-        ),
-        series=series,
+            holding_period_days=request.holding_period_days,
+        )
+    )
+
+    return StockPortfolioResponse.model_validate(
+        {
+            "inputs": request,
+            "results": {
+                "total_market_value": portfolio_response.results.total_market_value,
+                "portfolio_beta": portfolio_response.results.weighted_beta or 0,
+                "expected_return": portfolio_response.results.expected_return,
+                "largest_weight": portfolio_response.results.largest_weight,
+                "hhi": portfolio_response.results.hhi,
+                "concentration_level": portfolio_response.results.concentration_level,
+                "estimated_volatility": portfolio_response.results.estimated_volatility,
+                "holding_period_volatility": (
+                    portfolio_response.results.holding_period_volatility
+                ),
+                "var_95": portfolio_response.results.var_95,
+                "var_99": portfolio_response.results.var_99,
+                "loss_percent_95": portfolio_response.results.loss_percent_95,
+                "loss_percent_99": portfolio_response.results.loss_percent_99,
+            },
+            "interpretation": {
+                "label": "주식 포트폴리오(deprecated)",
+                "summary": (
+                    "/api/stocks/portfolio는 호환을 위해 유지됩니다. "
+                    "신규 포트폴리오 분석은 /api/portfolio/analyze를 사용합니다."
+                ),
+                "assumptions": [
+                    "stock 전용 holding은 공통 포트폴리오 분석 요청으로 변환됩니다.",
+                    "각 종목 변동성은 요청의 market_volatility 값을 공통 적용합니다.",
+                ],
+            },
+            "series": [
+                {
+                    "ticker": holding.instrument_id,
+                    "name": holding.name,
+                    "market_value": holding.market_value,
+                    "weight": holding.weight,
+                    "beta": holding.beta or 0,
+                    "expected_return": holding.expected_return,
+                    "contribution_to_beta": (
+                        holding.weight * holding.beta
+                        if holding.beta is not None
+                        else 0
+                    ),
+                    "contribution_to_return": holding.contribution_to_return,
+                }
+                for holding in portfolio_response.series
+            ],
+        }
     )

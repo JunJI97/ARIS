@@ -59,6 +59,6 @@ def post_stock_scenarios(request: StockScenarioRequest) -> StockScenarioResponse
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/portfolio", response_model=StockPortfolioResponse)
+@router.post("/portfolio", response_model=StockPortfolioResponse, deprecated=True)
 def post_stock_portfolio(request: StockPortfolioRequest) -> StockPortfolioResponse:
     return calculate_stock_portfolio(request)

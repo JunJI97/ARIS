@@ -187,6 +187,11 @@ type PortfolioHoldingForm = {
   volatility: number;
 };
 
+type PortfolioHoldingView = {
+  holding: PortfolioHoldingForm;
+  sourceIndex: number;
+};
+
 type PortfolioRiskForm = {
   holding_period_days: number;
 };
@@ -671,6 +676,22 @@ export default function Home() {
   const enabledAssetCount = assetTypes.filter(
     (assetType) => assetType.status === "enabled",
   ).length;
+
+  const portfolioStockHoldings = useMemo(
+    () =>
+      portfolioHoldings
+        .map((holding, sourceIndex) => ({ holding, sourceIndex }))
+        .filter(({ holding }) => holding.asset_type === "stock"),
+    [portfolioHoldings],
+  );
+
+  const portfolioBondHoldings = useMemo(
+    () =>
+      portfolioHoldings
+        .map((holding, sourceIndex) => ({ holding, sourceIndex }))
+        .filter(({ holding }) => holding.asset_type === "bond"),
+    [portfolioHoldings],
+  );
 
   const readinessItems = [
     {
@@ -1995,133 +2016,16 @@ export default function Home() {
             </section>
           </section>
         ) : activeTab === "portfolio" ? (
-              <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold">포트폴리오</h2>
-                    <p className="mt-1 text-sm text-[#6b7280]">
-                      주식과 채권 holding의 평가금액, 위험 입력값, 기대수익률을 바탕으로 공통 포트폴리오 지표와 VaR를 계산합니다.
-                    </p>
-                  </div>
-                  <button
-                    className="rounded bg-[#1f6feb] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
-                    disabled={portfolioLoading}
-                    onClick={handlePortfolioCalculate}
-                    type="button"
-                  >
-                    {portfolioLoading ? "계산 중..." : "포트폴리오 계산"}
-                  </button>
+          <section className="space-y-4">
+            <section className="rounded border border-[#d9dee7] bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">포트폴리오</h2>
+                  <p className="mt-1 text-sm text-[#6b7280]">
+                    주식과 채권 holding을 함께 넣어 기대수익률, 변동성, VaR, 집중도를 계산합니다.
+                  </p>
                 </div>
-
-                {portfolioError ? (
-                  <AlertBox tone="error">{portfolioError}</AlertBox>
-                ) : null}
-
-                <div className="mt-5 overflow-hidden rounded border border-[#e5e7eb]">
-                  <table className="w-full border-collapse text-sm">
-                    <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
-                      <tr>
-                        <th className="px-3 py-2 font-semibold">자산군</th>
-                        <th className="px-3 py-2 font-semibold">티커</th>
-                        <th className="px-3 py-2 font-semibold">평가금액</th>
-                        <th className="px-3 py-2 font-semibold">Beta</th>
-                        <th className="px-3 py-2 font-semibold">Duration</th>
-                        <th className="px-3 py-2 font-semibold">변동성</th>
-                        <th className="px-3 py-2 font-semibold">기대수익률</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {portfolioHoldings.map((holding, index) => (
-                        <tr
-                          className="border-t border-[#eef1f5]"
-                          key={holding.ticker}
-                        >
-                          <td className="px-3 py-2">{holding.asset_type}</td>
-                          <td className="px-3 py-2 font-semibold">
-                            {holding.ticker}
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
-                              onChange={(event) =>
-                                updatePortfolioHolding(
-                                  index,
-                                  "market_value",
-                                  event.target.value,
-                                )
-                              }
-                              step="1000000"
-                              type="number"
-                              value={holding.market_value}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
-                              onChange={(event) =>
-                                updatePortfolioHolding(
-                                  index,
-                                  "beta",
-                                  event.target.value,
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={holding.beta ?? ""}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
-                              onChange={(event) =>
-                                updatePortfolioHolding(
-                                  index,
-                                  "duration",
-                                  event.target.value,
-                                )
-                              }
-                              step="0.1"
-                              type="number"
-                              value={holding.duration ?? ""}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
-                              onChange={(event) =>
-                                updatePortfolioHolding(
-                                  index,
-                                  "volatility",
-                                  event.target.value,
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={holding.volatility}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
-                              onChange={(event) =>
-                                updatePortfolioHolding(
-                                  index,
-                                  "expected_return",
-                                  event.target.value,
-                                )
-                              }
-                              step="0.001"
-                              type="number"
-                              value={holding.expected_return}
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                   <NumberField
                     label="보유기간"
                     onChange={(value) =>
@@ -2131,168 +2035,198 @@ export default function Home() {
                     suffix="일"
                     value={portfolioRiskForm.holding_period_days}
                   />
+                  <button
+                    className="h-10 rounded bg-[#1f6feb] px-4 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                    disabled={portfolioLoading}
+                    onClick={handlePortfolioCalculate}
+                    type="button"
+                  >
+                    {portfolioLoading ? "계산 중..." : "계산"}
+                  </button>
                 </div>
+              </div>
 
-                <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                  <MetricCard
-                    hint="포트폴리오 전체 평가금액입니다."
-                    label="총 평가금액"
-                    value={
-                      portfolioAnalysis
-                        ? `${formatMoney(portfolioAnalysis.results.total_market_value)} 원`
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="Beta가 입력된 holding의 비중 가중평균입니다."
-                    label="Portfolio Beta"
-                    value={
-                      portfolioAnalysis
-                        ? portfolioAnalysis.results.weighted_beta !== null
-                          ? formatNumber(portfolioAnalysis.results.weighted_beta, 3)
-                          : "-"
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="holding별 기대수익률의 비중 가중평균입니다."
-                    label="기대수익률"
-                    value={
-                      portfolioAnalysis
-                        ? formatPercent(portfolioAnalysis.results.expected_return, 2)
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="가장 큰 단일 종목 비중입니다."
-                    label="최대 비중"
-                    value={
-                      portfolioAnalysis
-                        ? formatPercent(portfolioAnalysis.results.largest_weight, 1)
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="채권 holding 비중으로 가중평균한 duration입니다."
-                    label="Duration"
-                    value={
-                      portfolioAnalysis?.results.weighted_duration !== null &&
-                      portfolioAnalysis?.results.weighted_duration !== undefined
-                        ? formatNumber(portfolioAnalysis.results.weighted_duration, 2)
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="HHI 기반 집중도 판정입니다."
-                    label="집중도"
-                    value={
-                      portfolioAnalysis
-                        ? concentrationLabel(
-                            portfolioAnalysis.results.concentration_level,
-                          )
-                        : "-"
-                    }
-                  />
+              {portfolioError ? (
+                <AlertBox tone="error">{portfolioError}</AlertBox>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                <PortfolioInputPanel
+                  holdings={portfolioStockHoldings}
+                  metricKey="beta"
+                  metricLabel="Beta"
+                  title="주식 holding"
+                  updatePortfolioHolding={updatePortfolioHolding}
+                />
+                <PortfolioInputPanel
+                  holdings={portfolioBondHoldings}
+                  metricKey="duration"
+                  metricLabel="Duration"
+                  title="채권 holding"
+                  updatePortfolioHolding={updatePortfolioHolding}
+                />
+              </div>
+            </section>
+
+            <section className="rounded border border-[#d9dee7] bg-white p-4 shadow-sm">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <CompactMetricCard
+                  hint="전체 평가금액"
+                  label="총 평가금액"
+                  value={
+                    portfolioAnalysis
+                      ? `${formatMoney(portfolioAnalysis.results.total_market_value)} 원`
+                      : "-"
+                  }
+                />
+                <CompactMetricCard
+                  hint="비중 가중평균"
+                  label="기대수익률"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(portfolioAnalysis.results.expected_return, 2)
+                      : "-"
+                  }
+                />
+                <CompactMetricCard
+                  hint="연율 기준"
+                  label="추정 변동성"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(
+                          portfolioAnalysis.results.estimated_volatility,
+                          2,
+                        )
+                      : "-"
+                  }
+                />
+                <CompactMetricCard
+                  hint="95% 신뢰수준"
+                  label="VaR"
+                  value={
+                    portfolioAnalysis
+                      ? `${formatMoney(portfolioAnalysis.results.var_95)} 원`
+                      : "-"
+                  }
+                />
+              </div>
+
+              <div className="mt-3 grid gap-2 text-sm text-[#384252] md:grid-cols-3 xl:grid-cols-6">
+                <PortfolioStat
+                  label="Portfolio Beta"
+                  value={
+                    portfolioAnalysis?.results.weighted_beta !== null &&
+                    portfolioAnalysis?.results.weighted_beta !== undefined
+                      ? formatNumber(portfolioAnalysis.results.weighted_beta, 3)
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="Duration"
+                  value={
+                    portfolioAnalysis?.results.weighted_duration !== null &&
+                    portfolioAnalysis?.results.weighted_duration !== undefined
+                      ? formatNumber(portfolioAnalysis.results.weighted_duration, 2)
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="최대 비중"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(portfolioAnalysis.results.largest_weight, 1)
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="집중도"
+                  value={
+                    portfolioAnalysis
+                      ? concentrationLabel(
+                          portfolioAnalysis.results.concentration_level,
+                        )
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="99% VaR"
+                  value={
+                    portfolioAnalysis
+                      ? `${formatMoney(portfolioAnalysis.results.var_99)} 원`
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="99% 손실률"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(portfolioAnalysis.results.loss_percent_99, 2)
+                      : "-"
+                  }
+                />
+              </div>
+            </section>
+
+            {portfolioAnalysis ? (
+              <section className="overflow-hidden rounded border border-[#d9dee7] bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-[#eef1f5] px-4 py-3">
+                  <h3 className="text-sm font-semibold text-[#18202a]">분석 결과</h3>
+                  <span className="text-xs text-[#6b7280]">
+                    {portfolioAnalysis.series.length} holdings
+                  </span>
                 </div>
-
-                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                  <MetricCard
-                    hint="Portfolio beta와 시장 변동성으로 추정한 연율 변동성입니다."
-                    label="추정 변동성"
-                    value={
-                      portfolioAnalysis
-                        ? formatPercent(portfolioAnalysis.results.estimated_volatility, 2)
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="보유기간에 맞게 환산한 변동성입니다."
-                    label="보유기간 변동성"
-                    value={
-                      portfolioAnalysis
-                        ? formatPercent(
-                            portfolioAnalysis.results.holding_period_volatility,
-                            2,
-                          )
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="95% 신뢰수준의 parametric VaR입니다."
-                    label="95% VaR"
-                    value={
-                      portfolioAnalysis
-                        ? `${formatMoney(portfolioAnalysis.results.var_95)} 원`
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="99% 신뢰수준의 parametric VaR입니다."
-                    label="99% VaR"
-                    value={
-                      portfolioAnalysis
-                        ? `${formatMoney(portfolioAnalysis.results.var_99)} 원`
-                        : "-"
-                    }
-                  />
-                  <MetricCard
-                    hint="99% VaR의 포트폴리오 대비 손실률입니다."
-                    label="99% 손실률"
-                    value={
-                      portfolioAnalysis
-                        ? formatPercent(portfolioAnalysis.results.loss_percent_99, 2)
-                        : "-"
-                    }
-                  />
-                </div>
-
-                {portfolioAnalysis ? (
-                  <div className="mt-5 overflow-hidden rounded border border-[#e5e7eb]">
-                    <table className="w-full border-collapse text-sm">
-                      <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
-                        <tr>
-                          <th className="px-3 py-2 font-semibold">자산군</th>
-                          <th className="px-3 py-2 font-semibold">티커</th>
-                          <th className="px-3 py-2 font-semibold">비중</th>
-                          <th className="px-3 py-2 font-semibold">Beta</th>
-                          <th className="px-3 py-2 font-semibold">Duration</th>
-                          <th className="px-3 py-2 font-semibold">기대수익률</th>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] border-collapse text-sm">
+                    <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">자산군</th>
+                        <th className="px-3 py-2 font-semibold">티커</th>
+                        <th className="px-3 py-2 font-semibold">비중</th>
+                        <th className="px-3 py-2 font-semibold">Beta</th>
+                        <th className="px-3 py-2 font-semibold">Duration</th>
+                        <th className="px-3 py-2 font-semibold">변동성</th>
+                        <th className="px-3 py-2 font-semibold">기대수익률</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {portfolioAnalysis.series.map((holding) => (
+                        <tr
+                          className="border-t border-[#eef1f5]"
+                          key={holding.instrument_id}
+                        >
+                          <td className="px-3 py-2">
+                            {holding.asset_type === "stock" ? "주식" : "채권"}
+                          </td>
+                          <td className="px-3 py-2 font-semibold">
+                            {holding.instrument_id}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(holding.weight, 1)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {holding.beta !== null
+                              ? formatNumber(holding.beta, 2)
+                              : "-"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {holding.duration !== null
+                              ? formatNumber(holding.duration, 2)
+                              : "-"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(holding.volatility, 2)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(holding.expected_return, 2)}
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {portfolioAnalysis.series.map((holding) => (
-                          <tr
-                            className="border-t border-[#eef1f5]"
-                            key={holding.instrument_id}
-                          >
-                            <td className="px-3 py-2">{holding.asset_type}</td>
-                            <td className="px-3 py-2 font-semibold">
-                              {holding.instrument_id}
-                            </td>
-                            <td className="px-3 py-2">
-                              {formatPercent(holding.weight, 1)}
-                            </td>
-                            <td className="px-3 py-2">
-                              {holding.beta !== null
-                                ? formatNumber(holding.beta, 2)
-                                : "-"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {holding.duration !== null
-                                ? formatNumber(holding.duration, 2)
-                                : "-"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {formatPercent(holding.expected_return, 2)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </section>
-        ) : activeTab === "credit" ? (
+            ) : null}
+          </section>        ) : activeTab === "credit" ? (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
             <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
@@ -2934,6 +2868,158 @@ function MetricCard({
   );
 }
 
+function CompactMetricCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded border border-[#d9dee7] bg-[#fbfcfe] p-3">
+      <p className="text-xs font-medium text-[#5b6675]">{label}</p>
+      <p className="mt-2 text-xl font-bold text-[#111827]">{value}</p>
+      <p className="mt-1 text-xs text-[#7a8492]">{hint}</p>
+    </div>
+  );
+}
+
+function PortfolioStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded border border-[#e5e7eb] bg-[#fbfcfe] px-3 py-2">
+      <span className="text-xs font-medium text-[#6b7280]">{label}</span>
+      <span className="text-sm font-semibold text-[#111827]">{value}</span>
+    </div>
+  );
+}
+
+function PortfolioInputPanel({
+  title,
+  holdings,
+  metricKey,
+  metricLabel,
+  updatePortfolioHolding,
+}: {
+  title: string;
+  holdings: PortfolioHoldingView[];
+  metricKey: "beta" | "duration";
+  metricLabel: "Beta" | "Duration";
+  updatePortfolioHolding: (
+    index: number,
+    key: keyof Pick<
+      PortfolioHoldingForm,
+      "market_value" | "beta" | "duration" | "expected_return" | "volatility"
+    >,
+    value: string,
+  ) => void;
+}) {
+  return (
+    <section className="rounded border border-[#e5e7eb]">
+      <div className="flex items-center justify-between border-b border-[#eef1f5] px-3 py-2">
+        <h3 className="text-sm font-semibold text-[#18202a]">{title}</h3>
+        <span className="text-xs text-[#6b7280]">{holdings.length} holdings</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] border-collapse text-sm">
+          <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
+            <tr>
+              <th className="px-3 py-2 font-semibold">티커</th>
+              <th className="px-3 py-2 font-semibold">평가금액</th>
+              <th className="px-3 py-2 font-semibold">{metricLabel}</th>
+              <th className="px-3 py-2 font-semibold">변동성</th>
+              <th className="px-3 py-2 font-semibold">기대수익률</th>
+            </tr>
+          </thead>
+          <tbody>
+            {holdings.length === 0 ? (
+              <tr>
+                <td className="px-3 py-4 text-sm text-[#7a8492]" colSpan={5}>
+                  표시할 holding이 없습니다.
+                </td>
+              </tr>
+            ) : (
+              holdings.map(({ holding, sourceIndex }) => (
+                <tr className="border-t border-[#eef1f5]" key={holding.ticker}>
+                  <td className="px-3 py-2">
+                    <div className="font-semibold text-[#111827]">
+                      {holding.ticker}
+                    </div>
+                    <div className="max-w-[160px] truncate text-xs text-[#6b7280]">
+                      {holding.name}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          "market_value",
+                          event.target.value,
+                        )
+                      }
+                      step="1000000"
+                      type="number"
+                      value={holding.market_value}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          metricKey,
+                          event.target.value,
+                        )
+                      }
+                      step={metricKey === "beta" ? "0.01" : "0.1"}
+                      type="number"
+                      value={holding[metricKey] ?? ""}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          "volatility",
+                          event.target.value,
+                        )
+                      }
+                      step="0.01"
+                      type="number"
+                      value={holding.volatility}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          "expected_return",
+                          event.target.value,
+                        )
+                      }
+                      step="0.001"
+                      type="number"
+                      value={holding.expected_return}
+                    />
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function StatusChip({
   label,
   detail,
@@ -3119,4 +3205,5 @@ function TabButton({
     </button>
   );
 }
+
 
