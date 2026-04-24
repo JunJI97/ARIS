@@ -208,6 +208,13 @@ type PortfolioRiskForm = {
   holding_period_days: number;
 };
 
+type CreditAnalysisTarget = {
+  name: string;
+  source: "bond" | "stock" | "portfolio";
+  detail: string;
+  note: string;
+};
+
 type PortfolioAnalyzeResponse = {
   results: {
     total_market_value: number;
@@ -612,6 +619,42 @@ function periodStep(unit: PortfolioPeriodUnit) {
   return "1";
 }
 
+function creditFormFromRating(rating: string | null): CreditRiskForm {
+  if (!rating) return fallbackCreditForm;
+
+  const normalized = rating.toUpperCase();
+  if (normalized.startsWith("AAA") || normalized.startsWith("AA")) {
+    return {
+      debt_ratio: 0.42,
+      current_ratio: 1.7,
+      interest_coverage_ratio: 6.0,
+      operating_margin: 0.12,
+    };
+  }
+  if (normalized.startsWith("A")) {
+    return {
+      debt_ratio: 0.55,
+      current_ratio: 1.35,
+      interest_coverage_ratio: 3.8,
+      operating_margin: 0.08,
+    };
+  }
+  if (normalized.startsWith("BBB")) {
+    return {
+      debt_ratio: 0.68,
+      current_ratio: 1.1,
+      interest_coverage_ratio: 2.4,
+      operating_margin: 0.05,
+    };
+  }
+  return {
+    debt_ratio: 0.82,
+    current_ratio: 0.9,
+    interest_coverage_ratio: 1.4,
+    operating_margin: 0.03,
+  };
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("bond");
   const [searchDrawer, setSearchDrawer] = useState<SearchDrawerType | null>(null);
@@ -657,6 +700,8 @@ export default function Home() {
   const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
     null,
   );
+  const [creditTarget, setCreditTarget] =
+    useState<CreditAnalysisTarget | null>(null);
   const [projectResult, setProjectResult] =
     useState<ProjectFeasibilityResponse | null>(null);
   const [marketResult, setMarketResult] = useState<MarketRiskResponse | null>(
@@ -1394,6 +1439,64 @@ export default function Home() {
     setPortfolioPeriodUnit(unit);
   }
 
+  function startBondCreditAnalysis(instrument: BondInstrument) {
+    setCreditTarget({
+      name: instrument.issuer,
+      source: "bond",
+      detail: `${instrument.name} · ${instrument.credit_rating ?? "등급 없음"}`,
+      note:
+        "채권 발행사의 신용등급을 기준으로 시작 비율을 채웠습니다. 실제 재무제표 비율로 확인 후 계산하세요.",
+    });
+    setCreditForm(creditFormFromRating(instrument.credit_rating));
+    setCreditResult(null);
+    setCreditError(null);
+    setActiveTab("credit");
+  }
+
+  function startStockCreditAnalysis(instrument: StockInstrument) {
+    setCreditTarget({
+      name: instrument.name,
+      source: "stock",
+      detail: `${instrument.ticker} · ${instrument.exchange}`,
+      note:
+        "주식 현재 데이터에는 부채비율 등 신용평가용 재무비율이 없어서 중립 시작값을 넣었습니다. 재무제표 비율로 바꾼 뒤 계산하세요.",
+    });
+    setCreditForm(fallbackCreditForm);
+    setCreditResult(null);
+    setCreditError(null);
+    setActiveTab("credit");
+  }
+
+  function startPortfolioCreditAnalysis(holding: PortfolioHoldingForm) {
+    const stockInstrument = stockInstruments.find(
+      (instrument) => instrument.instrument_id === holding.instrument_id,
+    );
+    if (stockInstrument) {
+      startStockCreditAnalysis(stockInstrument);
+      return;
+    }
+
+    const bondInstrument = instruments.find(
+      (instrument) => instrument.instrument_id === holding.instrument_id,
+    );
+    if (bondInstrument) {
+      startBondCreditAnalysis(bondInstrument);
+      return;
+    }
+
+    setCreditTarget({
+      name: holding.name || holding.instrument_id,
+      source: "portfolio",
+      detail: `${holding.asset_type === "bond" ? "채권" : "주식"} 포트폴리오 편입 종목`,
+      note:
+        "포트폴리오 편입 종목을 신용위험 분석 대상으로 가져왔습니다. 재무제표 비율을 입력해 계산하세요.",
+    });
+    setCreditForm(fallbackCreditForm);
+    setCreditResult(null);
+    setCreditError(null);
+    setActiveTab("credit");
+  }
+
   function updateCreditForm(key: keyof CreditRiskForm, value: string) {
     setCreditForm((current) => ({
       ...current,
@@ -1585,6 +1688,13 @@ export default function Home() {
                       </div>
                     </>
                   ) : null}
+                  <button
+                    className="mt-3 rounded border border-[#1f6feb] bg-white px-3 py-1.5 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                    onClick={() => startBondCreditAnalysis(selectedInstrument)}
+                    type="button"
+                  >
+                    이 발행사 신용위험 보기
+                  </button>
                 </div>
               ) : null}
 
@@ -1932,6 +2042,13 @@ export default function Home() {
                       </div>
                     </>
                   ) : null}
+                  <button
+                    className="mt-3 rounded border border-[#1f6feb] bg-white px-3 py-1.5 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                    onClick={() => startStockCreditAnalysis(selectedStockInstrument)}
+                    type="button"
+                  >
+                    이 기업 신용위험 보기
+                  </button>
                 </div>
               ) : null}
 
@@ -2428,6 +2545,7 @@ export default function Home() {
                   }
                   options={portfolioStockOptions}
                   title="주식 구성"
+                  onAnalyzeCredit={startPortfolioCreditAnalysis}
                   updatePortfolioHolding={updatePortfolioHolding}
                 />
                 <PortfolioInputPanel
@@ -2442,6 +2560,7 @@ export default function Home() {
                   }
                   options={portfolioBondOptions}
                   title="채권 구성"
+                  onAnalyzeCredit={startPortfolioCreditAnalysis}
                   updatePortfolioHolding={updatePortfolioHolding}
                 />
               </div>
@@ -2622,6 +2741,24 @@ export default function Home() {
                 핵심 재무비율을 입력하면 가중치 기반 점수와 Normal / Watch /
                 Default 등급을 계산합니다.
               </p>
+
+              {creditTarget ? (
+                <div className="mt-4 rounded border border-[#dbeafe] bg-[#eff6ff] p-3 text-sm">
+                  <div className="font-semibold text-[#1f4f8f]">
+                    분석 대상: {creditTarget.name}
+                  </div>
+                  <div className="mt-1 text-xs text-[#49627a]">
+                    {creditTarget.detail}
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-[#1f4f8f]">
+                    {creditTarget.note}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-4 rounded border border-[#e5e7eb] bg-[#fbfcfe] p-3 text-xs leading-5 text-[#6b7280]">
+                  채권, 주식, 포트폴리오에서 대상을 선택하면 이곳에 분석 대상이 표시됩니다.
+                </div>
+              )}
 
               <div className="mt-5 grid gap-4">
                 <NumberField
@@ -3404,6 +3541,7 @@ function PortfolioInputPanel({
   onAdd,
   onRemove,
   onSelectInstrument,
+  onAnalyzeCredit,
   updatePortfolioHolding,
 }: {
   title: string;
@@ -3415,6 +3553,7 @@ function PortfolioInputPanel({
   onAdd: () => void;
   onRemove: (index: number) => void;
   onSelectInstrument: (index: number, instrumentId: string) => void;
+  onAnalyzeCredit: (holding: PortfolioHoldingForm) => void;
   updatePortfolioHolding: (
     index: number,
     key: keyof Pick<
@@ -3448,13 +3587,14 @@ function PortfolioInputPanel({
               <th className="px-3 py-2 font-semibold">{metricLabel}</th>
               <th className="px-3 py-2 font-semibold">변동성</th>
               <th className="px-3 py-2 font-semibold">기대수익률</th>
+              <th className="px-3 py-2 font-semibold">분석</th>
               <th className="px-3 py-2 font-semibold">관리</th>
             </tr>
           </thead>
           <tbody>
             {holdings.length === 0 ? (
               <tr>
-                <td className="px-3 py-4 text-sm text-[#7a8492]" colSpan={6}>
+                <td className="px-3 py-4 text-sm text-[#7a8492]" colSpan={7}>
                   표시할 종목이 없습니다.
                 </td>
               </tr>
@@ -3544,6 +3684,15 @@ function PortfolioInputPanel({
                       type="number"
                       value={holding.expected_return}
                     />
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      className="rounded border border-[#1f6feb] px-2 py-1 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                      onClick={() => onAnalyzeCredit(holding)}
+                      type="button"
+                    >
+                      신용
+                    </button>
                   </td>
                   <td className="px-3 py-2">
                     <button
