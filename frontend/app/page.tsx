@@ -192,6 +192,11 @@ type PortfolioHoldingView = {
   sourceIndex: number;
 };
 
+type PortfolioInstrumentOption = {
+  instrument_id: string;
+  label: string;
+};
+
 type PortfolioRiskForm = {
   holding_period_days: number;
 };
@@ -382,7 +387,7 @@ function calculateCapmReturn(
 
 function stockToPortfolioHolding(
   instrument: StockInstrument,
-  marketValue: number,
+  marketValue = 10000000,
 ): PortfolioHoldingForm {
   return {
     asset_type: "stock",
@@ -403,7 +408,7 @@ function stockToPortfolioHolding(
 
 function bondToPortfolioHolding(
   instrument: BondInstrument,
-  marketValue: number,
+  marketValue = 10000000,
 ): PortfolioHoldingForm {
   return {
     asset_type: "bond",
@@ -508,7 +513,7 @@ function validateCreditRiskForm(form: CreditRiskForm): string | null {
     return "이자보상배율은 0 이상 50 이하로 입력해야 합니다.";
   }
   if (form.operating_margin < -1 || form.operating_margin > 1) {
-    return "영업이익률은 -1 이상 1 이하의 decimal 값이어야 합니다.";
+    return "영업이익률은 -1 이상 1 이하의 소수 값이어야 합니다.";
   }
   return null;
 }
@@ -529,7 +534,7 @@ function validateProjectForm(form: ProjectForm): string | null {
 function validateMarketRiskForm(form: MarketRiskForm): string | null {
   if (form.portfolio_value <= 0) return "포트폴리오 가치는 0보다 커야 합니다.";
   if (form.annualized_volatility < 0 || form.annualized_volatility > 5) {
-    return "연율 변동성은 0 이상 5 이하의 decimal 값이어야 합니다.";
+    return "연율 변동성은 0 이상 5 이하의 소수 값이어야 합니다.";
   }
   if (form.holding_period_days < 1 || form.holding_period_days > 252) {
     return "보유 기간은 1일 이상 252일 이하여야 합니다.";
@@ -681,6 +686,24 @@ export default function Home() {
         .map((holding, sourceIndex) => ({ holding, sourceIndex }))
         .filter(({ holding }) => holding.asset_type === "bond"),
     [portfolioHoldings],
+  );
+
+  const portfolioStockOptions = useMemo(
+    () =>
+      stockInstruments.map((instrument) => ({
+        instrument_id: instrument.instrument_id,
+        label: `${instrument.ticker} · ${instrument.name}`,
+      })),
+    [stockInstruments],
+  );
+
+  const portfolioBondOptions = useMemo(
+    () =>
+      instruments.map((instrument) => ({
+        instrument_id: instrument.instrument_id,
+        label: instrument.name,
+      })),
+    [instruments],
   );
 
   const readinessItems = [
@@ -1171,6 +1194,66 @@ export default function Home() {
     setPortfolioAnalysis(null);
   }
 
+  function addPortfolioHolding(assetType: "stock" | "bond") {
+    const nextHolding =
+      assetType === "stock"
+        ? stockInstruments[0]
+          ? stockToPortfolioHolding(stockInstruments[0])
+          : null
+        : instruments[0]
+          ? bondToPortfolioHolding(instruments[0])
+          : null;
+
+    if (!nextHolding) {
+      setPortfolioError(
+        assetType === "stock"
+          ? "추가할 주식 샘플이 없습니다."
+          : "추가할 채권 샘플이 없습니다.",
+      );
+      return;
+    }
+
+    setPortfolioHoldings((current) => [...current, nextHolding]);
+    setPortfolioAnalysis(null);
+    setPortfolioError(null);
+  }
+
+  function removePortfolioHolding(index: number) {
+    setPortfolioHoldings((current) =>
+      current.filter((_, holdingIndex) => holdingIndex !== index),
+    );
+    setPortfolioAnalysis(null);
+  }
+
+  function selectPortfolioInstrument(
+    index: number,
+    assetType: "stock" | "bond",
+    instrumentId: string,
+  ) {
+    setPortfolioHoldings((current) =>
+      current.map((holding, holdingIndex) => {
+        if (holdingIndex !== index) return holding;
+
+        if (assetType === "stock") {
+          const instrument = stockInstruments.find(
+            (item) => item.instrument_id === instrumentId,
+          );
+          return instrument
+            ? stockToPortfolioHolding(instrument, holding.market_value)
+            : holding;
+        }
+
+        const instrument = instruments.find(
+          (item) => item.instrument_id === instrumentId,
+        );
+        return instrument
+          ? bondToPortfolioHolding(instrument, holding.market_value)
+          : holding;
+      }),
+    );
+    setPortfolioAnalysis(null);
+  }
+
   function updatePortfolioRiskForm(
     key: keyof PortfolioRiskForm,
     value: string,
@@ -1356,14 +1439,14 @@ export default function Home() {
                   label="표면금리"
                   onChange={(value) => updateBondForm("coupon_rate", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={bondForm.coupon_rate}
                 />
                 <NumberField
                   label="시장수익률"
                   onChange={(value) => updateBondForm("market_yield", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={bondForm.market_yield}
                 />
               </div>
@@ -1393,14 +1476,14 @@ export default function Home() {
                     label="최소 금리 충격"
                     onChange={(value) => updateBondForm("min_rate_shock", value)}
                     step="0.005"
-                    suffix="decimal"
+                    suffix="소수"
                     value={bondForm.min_rate_shock}
                   />
                   <NumberField
                     label="최대 금리 충격"
                     onChange={(value) => updateBondForm("max_rate_shock", value)}
                     step="0.005"
-                    suffix="decimal"
+                    suffix="소수"
                     value={bondForm.max_rate_shock}
                   />
                   <NumberField
@@ -1576,9 +1659,9 @@ export default function Home() {
                     `금리 충격 ${formatPercent(bondForm.min_rate_shock)} ~ ${formatPercent(
                       bondForm.max_rate_shock,
                     )}`,
-                    "채권 valuation 로직은 bond 전용 서비스로 분리되어 있습니다.",
+                    "채권 valuation 로직은 채권 전용 서비스로 분리되어 있습니다.",
                   ]}
-                  summary="수익률과 표면금리는 decimal 값으로 입력합니다. 채권 valuation은 자산군 전용 계산이고 공통 위험 지표와는 경계를 분리해 유지합니다."
+                  summary="수익률과 표면금리는 소수 값으로 입력합니다. 채권 valuation은 자산군 전용 계산이고 공통 위험 지표와는 경계를 분리해 유지합니다."
                   title="자산군 경계"
                 />
               </div>
@@ -1670,7 +1753,7 @@ export default function Home() {
                   label="요구수익률"
                   onChange={(value) => updateStockForm("required_return", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={stockForm.required_return}
                 />
                 <NumberField
@@ -1683,21 +1766,21 @@ export default function Home() {
                   label="무위험수익률"
                   onChange={(value) => updateStockForm("risk_free_rate", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={stockForm.risk_free_rate}
                 />
                 <NumberField
                   label="시장기대수익률"
                   onChange={(value) => updateStockForm("market_return", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={stockForm.market_return}
                 />
                 <NumberField
                   label="성장률"
                   onChange={(value) => updateStockForm("growth_rate", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={stockForm.growth_rate}
                 />
                 <NumberField
@@ -1733,7 +1816,7 @@ export default function Home() {
                       updateStockForm("min_growth_shock", value)
                     }
                     step="0.005"
-                    suffix="decimal"
+                    suffix="소수"
                     value={stockForm.min_growth_shock}
                   />
                   <NumberField
@@ -1742,7 +1825,7 @@ export default function Home() {
                       updateStockForm("max_growth_shock", value)
                     }
                     step="0.005"
-                    suffix="decimal"
+                    suffix="소수"
                     value={stockForm.max_growth_shock}
                   />
                   <NumberField
@@ -2019,7 +2102,7 @@ export default function Home() {
                     )}`,
                     "성장률이 요구수익률 이상이면 Gordon value는 표시하지 않습니다.",
                   ]}
-                  summary="주식 모듈은 자산군 전용 foundation으로 분리했고, 시장위험 VaR는 여러 자산군에서 재사용할 수 있는 공통 구조로 유지합니다."
+                  summary="주식 모듈은 자산군 전용 기반으로 분리했고, 시장위험 VaR는 여러 자산군에서 재사용할 수 있는 공통 구조로 유지합니다."
                   title="자산군 경계"
                 />
               </div>
@@ -2033,7 +2116,7 @@ export default function Home() {
                 <div>
                   <h2 className="text-lg font-semibold">포트폴리오</h2>
                   <p className="mt-1 text-sm text-[#6b7280]">
-                    주식과 채권 holding을 함께 넣어 기대수익률, 변동성, VaR, 집중도를 계산합니다.
+                    주식과 채권 구성 종목을 함께 넣어 기대수익률, 변동성, VaR, 집중도를 계산합니다.
                   </p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -2063,17 +2146,31 @@ export default function Home() {
 
               <div className="mt-4 grid gap-4 xl:grid-cols-2">
                 <PortfolioInputPanel
+                  addLabel="주식 추가"
                   holdings={portfolioStockHoldings}
                   metricKey="beta"
                   metricLabel="Beta"
-                  title="주식 holding"
+                  onAdd={() => addPortfolioHolding("stock")}
+                  onRemove={removePortfolioHolding}
+                  onSelectInstrument={(index, instrumentId) =>
+                    selectPortfolioInstrument(index, "stock", instrumentId)
+                  }
+                  options={portfolioStockOptions}
+                  title="주식 구성"
                   updatePortfolioHolding={updatePortfolioHolding}
                 />
                 <PortfolioInputPanel
+                  addLabel="채권 추가"
                   holdings={portfolioBondHoldings}
                   metricKey="duration"
                   metricLabel="Duration"
-                  title="채권 holding"
+                  onAdd={() => addPortfolioHolding("bond")}
+                  onRemove={removePortfolioHolding}
+                  onSelectInstrument={(index, instrumentId) =>
+                    selectPortfolioInstrument(index, "bond", instrumentId)
+                  }
+                  options={portfolioBondOptions}
+                  title="채권 구성"
                   updatePortfolioHolding={updatePortfolioHolding}
                 />
               </div>
@@ -2124,7 +2221,7 @@ export default function Home() {
 
               <div className="mt-3 grid gap-2 text-sm text-[#384252] md:grid-cols-3 xl:grid-cols-6">
                 <PortfolioStat
-                  label="Portfolio Beta"
+                  label="포트폴리오 Beta"
                   value={
                     portfolioAnalysis?.results.weighted_beta !== null &&
                     portfolioAnalysis?.results.weighted_beta !== undefined
@@ -2183,7 +2280,7 @@ export default function Home() {
                 <div className="flex items-center justify-between border-b border-[#eef1f5] px-4 py-3">
                   <h3 className="text-sm font-semibold text-[#18202a]">분석 결과</h3>
                   <span className="text-xs text-[#6b7280]">
-                    {portfolioAnalysis.series.length} holdings
+                    {portfolioAnalysis.series.length}개 종목
                   </span>
                 </div>
                 <div className="overflow-x-auto">
@@ -2260,7 +2357,7 @@ export default function Home() {
                   label="부채비율"
                   onChange={(value) => updateCreditForm("debt_ratio", value)}
                   step="0.01"
-                  suffix="decimal"
+                  suffix="소수"
                   value={creditForm.debt_ratio}
                 />
                 <NumberField
@@ -2285,7 +2382,7 @@ export default function Home() {
                     updateCreditForm("operating_margin", value)
                   }
                   step="0.01"
-                  suffix="decimal"
+                  suffix="소수"
                   value={creditForm.operating_margin}
                 />
               </div>
@@ -2426,7 +2523,7 @@ export default function Home() {
                   label="할인율"
                   onChange={(value) => updateProjectForm("discount_rate", value)}
                   step="0.001"
-                  suffix="decimal"
+                  suffix="소수"
                   value={projectForm.discount_rate}
                 />
                 <label className="block text-sm font-medium text-[#384252]">
@@ -2620,8 +2717,8 @@ export default function Home() {
                     }
                     value={marketForm.asset_type}
                   >
-                    <option value="bond">bond</option>
-                    <option value="stock">stock</option>
+                    <option value="bond">채권</option>
+                    <option value="stock">주식</option>
                   </select>
                 </label>
                 <NumberField
@@ -2636,7 +2733,7 @@ export default function Home() {
                     updateMarketForm("annualized_volatility", value)
                   }
                   step="0.01"
-                  suffix="decimal"
+                  suffix="소수"
                   value={marketForm.annualized_volatility}
                 />
                 <NumberField
@@ -2805,10 +2902,10 @@ export default function Home() {
                     `asset_type ${marketForm.asset_type}`,
                     `신뢰수준 ${Math.round(marketForm.confidence_level * 100)}%`,
                     `연율 변동성 ${formatPercent(marketForm.annualized_volatility, 2)}`,
-                    "시장위험 VaR는 bond와 future stock 모두에 재사용 가능한 common risk 구조입니다.",
+                    "시장위험 VaR는 채권과 향후 주식 모두에 재사용 가능한 공통 risk 구조입니다.",
                   ]}
                   summary="VaR는 공통 위험 모듈로 분리되어 있어 자산군이 늘어나도 같은 입력 구조와 API 패턴을 유지할 수 있습니다."
-                  title="Multi-Asset 준비도"
+                  title="멀티에셋 준비도"
                 />
               </div>
             </section>
@@ -2908,15 +3005,25 @@ function PortfolioStat({ label, value }: { label: string; value: string }) {
 
 function PortfolioInputPanel({
   title,
+  addLabel,
   holdings,
+  options,
   metricKey,
   metricLabel,
+  onAdd,
+  onRemove,
+  onSelectInstrument,
   updatePortfolioHolding,
 }: {
   title: string;
+  addLabel: string;
   holdings: PortfolioHoldingView[];
+  options: PortfolioInstrumentOption[];
   metricKey: "beta" | "duration";
   metricLabel: "Beta" | "Duration";
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onSelectInstrument: (index: number, instrumentId: string) => void;
   updatePortfolioHolding: (
     index: number,
     key: keyof Pick<
@@ -2930,34 +3037,60 @@ function PortfolioInputPanel({
     <section className="rounded border border-[#e5e7eb]">
       <div className="flex items-center justify-between border-b border-[#eef1f5] px-3 py-2">
         <h3 className="text-sm font-semibold text-[#18202a]">{title}</h3>
-        <span className="text-xs text-[#6b7280]">{holdings.length} holdings</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[#6b7280]">{holdings.length}개 종목</span>
+          <button
+            className="rounded border border-[#cfd6e0] px-2 py-1 text-xs font-semibold text-[#1f2937] transition hover:border-[#1f6feb] hover:text-[#1f6feb]"
+            onClick={onAdd}
+            type="button"
+          >
+            {addLabel}
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] border-collapse text-sm">
+        <table className="w-full min-w-[760px] border-collapse text-sm">
           <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
             <tr>
-              <th className="px-3 py-2 font-semibold">티커</th>
+              <th className="px-3 py-2 font-semibold">종목</th>
               <th className="px-3 py-2 font-semibold">평가금액</th>
               <th className="px-3 py-2 font-semibold">{metricLabel}</th>
               <th className="px-3 py-2 font-semibold">변동성</th>
               <th className="px-3 py-2 font-semibold">기대수익률</th>
+              <th className="px-3 py-2 font-semibold">관리</th>
             </tr>
           </thead>
           <tbody>
             {holdings.length === 0 ? (
               <tr>
-                <td className="px-3 py-4 text-sm text-[#7a8492]" colSpan={5}>
-                  표시할 holding이 없습니다.
+                <td className="px-3 py-4 text-sm text-[#7a8492]" colSpan={6}>
+                  표시할 종목이 없습니다.
                 </td>
               </tr>
             ) : (
               holdings.map(({ holding, sourceIndex }) => (
-                <tr className="border-t border-[#eef1f5]" key={holding.ticker}>
+                <tr
+                  className="border-t border-[#eef1f5]"
+                  key={`${sourceIndex}-${holding.instrument_id}`}
+                >
                   <td className="px-3 py-2">
-                    <div className="font-semibold text-[#111827]">
-                      {holding.ticker}
-                    </div>
-                    <div className="max-w-[160px] truncate text-xs text-[#6b7280]">
+                    <select
+                      className="w-full rounded border border-[#cfd6e0] bg-white px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        onSelectInstrument(sourceIndex, event.target.value)
+                      }
+                      value={holding.instrument_id}
+                    >
+                      {options.map((option) => (
+                        <option
+                          key={option.instrument_id}
+                          value={option.instrument_id}
+                        >
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-1 max-w-[180px] truncate text-xs text-[#6b7280]">
                       {holding.name}
                     </div>
                   </td>
@@ -3020,6 +3153,15 @@ function PortfolioInputPanel({
                       type="number"
                       value={holding.expected_return}
                     />
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      className="rounded border border-[#d9dee7] px-2 py-1 text-xs font-semibold text-[#6b7280] transition hover:border-[#b42318] hover:text-[#b42318]"
+                      onClick={() => onRemove(sourceIndex)}
+                      type="button"
+                    >
+                      삭제
+                    </button>
                   </td>
                 </tr>
               ))
@@ -3216,5 +3358,4 @@ function TabButton({
     </button>
   );
 }
-
 
