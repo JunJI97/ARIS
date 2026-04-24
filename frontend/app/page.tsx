@@ -56,6 +56,12 @@ type BondInstrument = {
   credit_rating: string | null;
 };
 
+type MarketDataMeta = {
+  source: string;
+  fallback_used: boolean;
+  assumptions: string[];
+};
+
 type BondForm = {
   face_value: number;
   coupon_rate: number;
@@ -91,6 +97,10 @@ type BondScenarioResponse = {
   };
   interpretation: Interpretation;
   series: BondScenarioPoint[];
+};
+
+type BondMarketDataResponse = MarketDataMeta & {
+  instrument: BondInstrument;
 };
 
 type StockInstrument = {
@@ -159,6 +169,10 @@ type StockScenarioResponse = {
   };
   interpretation: Interpretation;
   series: StockScenarioPoint[];
+};
+
+type StockMarketDataResponse = MarketDataMeta & {
+  instrument: StockInstrument;
 };
 
 type PortfolioHoldingResult = {
@@ -593,8 +607,14 @@ export default function Home() {
   const [assetTypeError, setAssetTypeError] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<BondInstrument[]>([]);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
+  const [bondSearchQuery, setBondSearchQuery] = useState("treasury");
+  const [bondSearchResults, setBondSearchResults] = useState<BondInstrument[]>([]);
   const [stockInstruments, setStockInstruments] = useState<StockInstrument[]>([]);
   const [selectedStockInstrumentId, setSelectedStockInstrumentId] = useState("");
+  const [stockSearchQuery, setStockSearchQuery] = useState("AAPL");
+  const [stockSearchResults, setStockSearchResults] = useState<StockInstrument[]>(
+    [],
+  );
   const [portfolioHoldings, setPortfolioHoldings] = useState<
     PortfolioHoldingForm[]
   >([]);
@@ -612,10 +632,14 @@ export default function Home() {
     useState<MarketRiskForm>(fallbackMarketForm);
   const [valuation, setValuation] = useState<BondValuationResponse | null>(null);
   const [scenario, setScenario] = useState<BondScenarioResponse | null>(null);
+  const [bondMarketData, setBondMarketData] =
+    useState<BondMarketDataResponse | null>(null);
   const [stockValuation, setStockValuation] =
     useState<StockValuationResponse | null>(null);
   const [stockScenario, setStockScenario] =
     useState<StockScenarioResponse | null>(null);
+  const [stockMarketData, setStockMarketData] =
+    useState<StockMarketDataResponse | null>(null);
   const [portfolioAnalysis, setPortfolioAnalysis] =
     useState<PortfolioAnalyzeResponse | null>(null);
   const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
@@ -628,6 +652,8 @@ export default function Home() {
   );
   const [bondLoading, setBondLoading] = useState(false);
   const [stockLoading, setStockLoading] = useState(false);
+  const [bondSearchLoading, setBondSearchLoading] = useState(false);
+  const [stockSearchLoading, setStockSearchLoading] = useState(false);
   const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [creditLoading, setCreditLoading] = useState(false);
   const [projectLoading, setProjectLoading] = useState(false);
@@ -790,6 +816,15 @@ export default function Home() {
 
         if (firstInstrument) {
           setSelectedInstrumentId(firstInstrument.instrument_id);
+          setBondMarketData({
+            instrument: firstInstrument,
+            source: "sample",
+            fallback_used: true,
+            assumptions: [
+              "초기 목록은 샘플 데이터입니다.",
+              "검색을 실행하면 외부 Treasury yield curve 데이터를 적용합니다.",
+            ],
+          });
           setBondForm((current) => ({
             ...current,
             face_value: firstInstrument.face_value,
@@ -805,6 +840,15 @@ export default function Home() {
 
         if (firstStockInstrument) {
           setSelectedStockInstrumentId(firstStockInstrument.instrument_id);
+          setStockMarketData({
+            instrument: firstStockInstrument,
+            source: "sample",
+            fallback_used: true,
+            assumptions: [
+              "초기 목록은 샘플 데이터입니다.",
+              "검색을 실행하면 Yahoo Finance chart 데이터의 현재가, 통화, 거래소를 적용합니다.",
+            ],
+          });
           setStockForm((current) => ({
             ...current,
             current_price: firstStockInstrument.last_price,
@@ -856,13 +900,52 @@ export default function Home() {
     };
   }, []);
 
+  async function handleBondSearch() {
+    const query = bondSearchQuery.trim();
+    if (!query) {
+      setBondError("검색어를 입력해 주세요.");
+      return;
+    }
+
+    setBondSearchLoading(true);
+    setBondError(null);
+    setBondWarning(null);
+
+    try {
+      const payload = await fetchJson<{ instruments: BondInstrument[] }>(
+        `/api/bonds/search?query=${encodeURIComponent(query)}`,
+      );
+      setBondSearchResults(payload.instruments);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
+      setBondError(`채권 검색에 실패했습니다. ${message}`);
+    } finally {
+      setBondSearchLoading(false);
+    }
+  }
+
+  function applyBondSearchResult(instrument: BondInstrument) {
+    setInstruments((current) => {
+      if (
+        current.some(
+          (item) => item.instrument_id === instrument.instrument_id,
+        )
+      ) {
+        return current;
+      }
+      return [instrument, ...current];
+    });
+    handleSelectInstrument(instrument.instrument_id);
+  }
+
   async function handleSelectInstrument(instrumentId: string) {
     setSelectedInstrumentId(instrumentId);
     setBondError(null);
     setBondWarning(null);
 
     try {
-      const payload = await fetchJson<{ instrument: BondInstrument }>(
+      const payload = await fetchJson<BondMarketDataResponse>(
         `/api/bonds/market-data?instrument_id=${encodeURIComponent(instrumentId)}`,
       );
 
@@ -875,6 +958,7 @@ export default function Home() {
         payment_frequency: payload.instrument.payment_frequency,
       }));
 
+      setBondMarketData(payload);
       setValuation(null);
       setScenario(null);
     } catch (caught) {
@@ -932,12 +1016,50 @@ export default function Home() {
     }
   }
 
+  async function handleStockSearch() {
+    const query = stockSearchQuery.trim();
+    if (!query) {
+      setStockError("검색어를 입력해 주세요.");
+      return;
+    }
+
+    setStockSearchLoading(true);
+    setStockError(null);
+
+    try {
+      const payload = await fetchJson<{ instruments: StockInstrument[] }>(
+        `/api/stocks/search?query=${encodeURIComponent(query)}`,
+      );
+      setStockSearchResults(payload.instruments);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류입니다.";
+      setStockError(`주식 검색에 실패했습니다. ${message}`);
+    } finally {
+      setStockSearchLoading(false);
+    }
+  }
+
+  function applyStockSearchResult(instrument: StockInstrument) {
+    setStockInstruments((current) => {
+      if (
+        current.some(
+          (item) => item.instrument_id === instrument.instrument_id,
+        )
+      ) {
+        return current;
+      }
+      return [instrument, ...current];
+    });
+    handleSelectStockInstrument(instrument.instrument_id);
+  }
+
   async function handleSelectStockInstrument(instrumentId: string) {
     setSelectedStockInstrumentId(instrumentId);
     setStockError(null);
 
     try {
-      const payload = await fetchJson<{ instrument: StockInstrument }>(
+      const payload = await fetchJson<StockMarketDataResponse>(
         `/api/stocks/market-data?instrument_id=${encodeURIComponent(instrumentId)}`,
       );
 
@@ -952,6 +1074,7 @@ export default function Home() {
         shares_outstanding: payload.instrument.shares_outstanding,
       }));
 
+      setStockMarketData(payload);
       setStockValuation(null);
       setStockScenario(null);
     } catch (caught) {
@@ -1393,7 +1516,67 @@ export default function Home() {
               </div>
 
               <label className="mt-5 block text-sm font-medium text-[#384252]">
-                샘플 채권
+                채권 검색
+                <div className="mt-2 flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                    onChange={(event) => setBondSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleBondSearch();
+                      }
+                    }}
+                    placeholder="treasury, 5y, 10y"
+                    value={bondSearchQuery}
+                  />
+                  <button
+                    className="rounded bg-[#1f6feb] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#174ea6] disabled:bg-[#9aa4b2]"
+                    disabled={bondSearchLoading}
+                    onClick={handleBondSearch}
+                    type="button"
+                  >
+                    {bondSearchLoading ? "검색 중" : "검색"}
+                  </button>
+                </div>
+              </label>
+
+              {bondSearchResults.length > 0 ? (
+                <div className="mt-4 rounded border border-[#e5e7eb] bg-[#fbfcfe]">
+                  <div className="border-b border-[#eef1f5] px-3 py-2 text-xs font-semibold text-[#5b6675]">
+                    검색 후보 {bondSearchResults.length}개
+                  </div>
+                  <div className="divide-y divide-[#eef1f5]">
+                    {bondSearchResults.map((instrument) => (
+                      <div
+                        className="grid gap-3 px-3 py-3 text-sm sm:grid-cols-[1fr_auto]"
+                        key={instrument.instrument_id}
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-[#111827]">
+                            {instrument.name}
+                          </div>
+                          <div className="mt-1 text-xs leading-5 text-[#6b7280]">
+                            {instrument.issuer} · {instrument.currency} ·{" "}
+                            {formatNumber(instrument.maturity_years, 1)}Y ·{" "}
+                            {formatPercent(instrument.market_yield)}
+                          </div>
+                        </div>
+                        <button
+                          className="rounded border border-[#1f6feb] px-3 py-1.5 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                          onClick={() => applyBondSearchResult(instrument)}
+                          type="button"
+                        >
+                          적용
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <label className="mt-4 block text-sm font-medium text-[#384252]">
+                적용된 채권
                 <select
                   className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
                   onChange={(event) => handleSelectInstrument(event.target.value)}
@@ -1419,7 +1602,26 @@ export default function Home() {
                   <div>통화: {selectedInstrument.currency}</div>
                   <div>표면금리: {formatPercent(selectedInstrument.coupon_rate)}</div>
                   <div>시장수익률: {formatPercent(selectedInstrument.market_yield)}</div>
+                  {bondMarketData ? (
+                    <>
+                      <div>데이터 출처: {bondMarketData.source}</div>
+                      <div>
+                        적용 방식:{" "}
+                        {bondMarketData.fallback_used
+                          ? "샘플 데이터"
+                          : "외부 API 적용"}
+                      </div>
+                    </>
+                  ) : null}
                 </div>
+              ) : null}
+
+              {bondMarketData?.assumptions.length ? (
+                <ul className="mt-3 space-y-1 rounded border border-[#dbeafe] bg-[#eff6ff] p-3 text-xs leading-5 text-[#1f4f8f]">
+                  {bondMarketData.assumptions.map((assumption) => (
+                    <li key={assumption}>{assumption}</li>
+                  ))}
+                </ul>
               ) : null}
 
               <div className="mt-5 grid gap-4">
@@ -1680,7 +1882,66 @@ export default function Home() {
               </div>
 
               <label className="mt-5 block text-sm font-medium text-[#384252]">
-                샘플 종목
+                주식 검색
+                <div className="mt-2 flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                    onChange={(event) => setStockSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleStockSearch();
+                      }
+                    }}
+                    placeholder="AAPL, 삼성전자, 005930.KS"
+                    value={stockSearchQuery}
+                  />
+                  <button
+                    className="rounded bg-[#1f6feb] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#174ea6] disabled:bg-[#9aa4b2]"
+                    disabled={stockSearchLoading}
+                    onClick={handleStockSearch}
+                    type="button"
+                  >
+                    {stockSearchLoading ? "검색 중" : "검색"}
+                  </button>
+                </div>
+              </label>
+
+              {stockSearchResults.length > 0 ? (
+                <div className="mt-4 rounded border border-[#e5e7eb] bg-[#fbfcfe]">
+                  <div className="border-b border-[#eef1f5] px-3 py-2 text-xs font-semibold text-[#5b6675]">
+                    검색 후보 {stockSearchResults.length}개
+                  </div>
+                  <div className="divide-y divide-[#eef1f5]">
+                    {stockSearchResults.map((instrument) => (
+                      <div
+                        className="grid gap-3 px-3 py-3 text-sm sm:grid-cols-[1fr_auto]"
+                        key={instrument.instrument_id}
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-[#111827]">
+                            {instrument.ticker} · {instrument.name}
+                          </div>
+                          <div className="mt-1 text-xs leading-5 text-[#6b7280]">
+                            {instrument.exchange} · {instrument.currency} ·{" "}
+                            {formatMoney(instrument.last_price, 2)}
+                          </div>
+                        </div>
+                        <button
+                          className="rounded border border-[#1f6feb] px-3 py-1.5 text-xs font-semibold text-[#1f4f8f] transition hover:bg-[#eff6ff]"
+                          onClick={() => applyStockSearchResult(instrument)}
+                          type="button"
+                        >
+                          적용
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <label className="mt-4 block text-sm font-medium text-[#384252]">
+                적용된 종목
                 <select
                   className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
                   onChange={(event) =>
@@ -1711,7 +1972,26 @@ export default function Home() {
                     예상 성장률:{" "}
                     {formatPercent(selectedStockInstrument.expected_growth_rate)}
                   </div>
+                  {stockMarketData ? (
+                    <>
+                      <div>데이터 출처: {stockMarketData.source}</div>
+                      <div>
+                        적용 방식:{" "}
+                        {stockMarketData.fallback_used
+                          ? "샘플 데이터"
+                          : "외부 API 적용"}
+                      </div>
+                    </>
+                  ) : null}
                 </div>
+              ) : null}
+
+              {stockMarketData?.assumptions.length ? (
+                <ul className="mt-3 space-y-1 rounded border border-[#dbeafe] bg-[#eff6ff] p-3 text-xs leading-5 text-[#1f4f8f]">
+                  {stockMarketData.assumptions.map((assumption) => (
+                    <li key={assumption}>{assumption}</li>
+                  ))}
+                </ul>
               ) : null}
 
               <div className="mt-5 grid gap-4">

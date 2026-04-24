@@ -45,6 +45,111 @@ class StocksApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("Unknown stock instrument_id", response.json()["detail"])
 
+    def test_stock_search_uses_market_data_provider(self) -> None:
+        from app.api import stocks
+        from app.schemas.stocks import StockInstrument
+
+        original_search = stocks.search_yahoo_stocks
+        stocks.search_yahoo_stocks = lambda query: [
+            StockInstrument(
+                instrument_id="yahoo:AAPL",
+                ticker="AAPL",
+                name="Apple Inc.",
+                exchange="NasdaqGS",
+                currency="USD",
+                last_price=273.43,
+                shares_outstanding=1_000_000,
+                eps_ttm=15.0,
+                book_value_per_share=65.0,
+                dividend_per_share=1.64,
+                beta=1.0,
+                expected_growth_rate=0.04,
+            )
+        ]
+        try:
+            response = self.client.get("/api/stocks/search", params={"query": "AAPL"})
+        finally:
+            stocks.search_yahoo_stocks = original_search
+
+        self.assertEqual(response.status_code, 200)
+        instruments = response.json()["instruments"]
+        self.assertEqual(instruments[0]["instrument_id"], "yahoo:AAPL")
+        self.assertEqual(instruments[0]["ticker"], "AAPL")
+
+    def test_yahoo_stock_market_data_has_external_source(self) -> None:
+        from app.api import stocks
+        from app.schemas.stocks import StockInstrument
+        from app.services.market_data import StockMarketDataResult
+
+        original_get = stocks.get_yahoo_stock_result
+        stocks.get_yahoo_stock_result = lambda instrument_id: StockMarketDataResult(
+            fundamentals_source="placeholder",
+            instrument=StockInstrument(
+                instrument_id=instrument_id,
+                ticker="AAPL",
+                name="Apple Inc.",
+                exchange="NasdaqGS",
+                currency="USD",
+                last_price=273.43,
+                shares_outstanding=1_000_000,
+                eps_ttm=15.0,
+                book_value_per_share=65.0,
+                dividend_per_share=1.64,
+                beta=1.0,
+                expected_growth_rate=0.04,
+            ),
+        )
+        try:
+            response = self.client.get(
+                "/api/stocks/market-data",
+                params={"instrument_id": "yahoo:AAPL"},
+            )
+        finally:
+            stocks.get_yahoo_stock_result = original_get
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "yahoo-finance-chart+placeholder")
+        self.assertFalse(payload["fallback_used"])
+
+    def test_yahoo_stock_market_data_uses_fundamentals_provider_when_available(
+        self,
+    ) -> None:
+        from app.api import stocks
+        from app.schemas.stocks import StockInstrument
+        from app.services.market_data import StockMarketDataResult
+
+        original_get = stocks.get_yahoo_stock_result
+        stocks.get_yahoo_stock_result = lambda instrument_id: StockMarketDataResult(
+            fundamentals_source="alpha-vantage-overview",
+            instrument=StockInstrument(
+                instrument_id=instrument_id,
+                ticker="AAPL",
+                name="Apple Inc.",
+                exchange="NasdaqGS",
+                currency="USD",
+                last_price=273.43,
+                shares_outstanding=15_000_000_000,
+                eps_ttm=7.5,
+                book_value_per_share=4.5,
+                dividend_per_share=1.08,
+                beta=1.2,
+                expected_growth_rate=0.05,
+            ),
+        )
+        try:
+            response = self.client.get(
+                "/api/stocks/market-data",
+                params={"instrument_id": "yahoo:AAPL"},
+            )
+        finally:
+            stocks.get_yahoo_stock_result = original_get
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["source"], "yahoo-finance-chart+alpha-vantage-overview")
+        self.assertIn("Alpha Vantage", payload["assumptions"][-1])
+
     def test_stock_valuation_api_returns_core_metrics(self) -> None:
         response = self.client.post(
             "/api/stocks/valuation",

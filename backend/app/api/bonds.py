@@ -10,6 +10,7 @@ from app.schemas.bonds import (
     BondValuationResponse,
 )
 from app.services.bonds import calculate_bond_scenarios, calculate_bond_valuation
+from app.services.market_data import get_treasury_bond, list_treasury_bonds
 
 router = APIRouter(prefix="/api/bonds", tags=["bonds"])
 
@@ -19,8 +20,53 @@ def get_bond_instruments() -> BondInstrumentsResponse:
     return BondInstrumentsResponse(instruments=list_sample_bonds())
 
 
+@router.get("/search", response_model=BondInstrumentsResponse)
+def search_bond_instruments(query: str = "treasury") -> BondInstrumentsResponse:
+    try:
+        instruments = list_treasury_bonds(query)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Bond market-data provider failed: {exc}",
+        ) from exc
+
+    if not instruments:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No bond instruments found for query: {query}",
+        )
+
+    return BondInstrumentsResponse(instruments=instruments)
+
+
 @router.get("/market-data", response_model=BondMarketDataResponse)
 def get_bond_market_data(instrument_id: str) -> BondMarketDataResponse:
+    if instrument_id.startswith("treasury:"):
+        try:
+            instrument = get_treasury_bond(instrument_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Bond market-data provider failed: {exc}",
+            ) from exc
+
+        if instrument is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown Treasury instrument_id: {instrument_id}",
+            )
+
+        return BondMarketDataResponse(
+            instrument=instrument,
+            source="us-treasury-yield-curve",
+            fallback_used=False,
+            assumptions=[
+                "Market yield comes from the latest U.S. Treasury Daily Par Yield Curve XML feed.",
+                "Coupon rate is set equal to the par yield, so the generated bond prices near par.",
+                "Face value is normalized to 10,000 USD for ARIS valuation inputs.",
+            ],
+        )
+
     instrument = get_sample_bond(instrument_id)
     if instrument is None:
         raise HTTPException(
