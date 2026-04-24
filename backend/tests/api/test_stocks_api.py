@@ -110,6 +110,38 @@ class StocksApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("min_growth_shock", response.json()["detail"])
 
+    def test_stock_portfolio_api_returns_weighted_metrics(self) -> None:
+        response = self.client.post(
+            "/api/stocks/portfolio",
+            json={
+                "holdings": [
+                    {
+                        "ticker": "AAA",
+                        "market_value": 600000,
+                        "beta": 1.2,
+                        "expected_return": 0.1,
+                    },
+                    {
+                        "ticker": "BBB",
+                        "market_value": 400000,
+                        "beta": 0.8,
+                        "expected_return": 0.06,
+                    },
+                ],
+                "market_volatility": 0.2,
+                "holding_period_days": 10,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        results = response.json()["results"]
+        self.assertEqual(results["total_market_value"], 1000000)
+        self.assertEqual(results["portfolio_beta"], 1.04)
+        self.assertEqual(results["expected_return"], 0.084)
+        self.assertIn("var_95", results)
+        self.assertIn("var_99", results)
+        self.assertEqual(len(response.json()["series"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

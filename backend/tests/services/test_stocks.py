@@ -1,7 +1,16 @@
 import unittest
 
-from app.schemas.stocks import StockScenarioRequest, StockValuationRequest
-from app.services.stocks import calculate_stock_scenarios, calculate_stock_valuation
+from app.schemas.stocks import (
+    StockPortfolioHoldingRequest,
+    StockPortfolioRequest,
+    StockScenarioRequest,
+    StockValuationRequest,
+)
+from app.services.stocks import (
+    calculate_stock_portfolio,
+    calculate_stock_scenarios,
+    calculate_stock_valuation,
+)
 
 
 class StockServiceTest(unittest.TestCase):
@@ -104,6 +113,38 @@ class StockServiceTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             calculate_stock_scenarios(request)
+
+    def test_stock_portfolio_returns_weighted_metrics(self) -> None:
+        request = StockPortfolioRequest(
+            holdings=[
+                StockPortfolioHoldingRequest(
+                    ticker="AAA",
+                    market_value=60,
+                    beta=1.2,
+                    expected_return=0.1,
+                ),
+                StockPortfolioHoldingRequest(
+                    ticker="BBB",
+                    market_value=40,
+                    beta=0.8,
+                    expected_return=0.06,
+                ),
+            ],
+            market_volatility=0.2,
+            holding_period_days=10,
+        )
+
+        result = calculate_stock_portfolio(request)
+
+        self.assertEqual(result.results.total_market_value, 100)
+        self.assertEqual(result.results.portfolio_beta, 1.04)
+        self.assertEqual(result.results.expected_return, 0.084)
+        self.assertEqual(result.results.largest_weight, 0.6)
+        self.assertEqual(result.results.concentration_level, "high")
+        self.assertEqual(result.results.estimated_volatility, 0.208)
+        self.assertGreater(result.results.var_95, 0)
+        self.assertGreater(result.results.var_99, result.results.var_95)
+        self.assertEqual(len(result.series), 2)
 
 
 if __name__ == "__main__":
