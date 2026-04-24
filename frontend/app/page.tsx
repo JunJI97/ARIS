@@ -201,6 +201,18 @@ function formatMoney(value: number, digits = 0) {
   }).format(value);
 }
 
+function formatMoneyGuide(value: number) {
+  const absoluteValue = Math.abs(value);
+
+  if (absoluteValue >= 100000000) {
+    return `약 ${(value / 100000000).toFixed(1)}억원`;
+  }
+  if (absoluteValue >= 10000) {
+    return `약 ${(value / 10000).toFixed(0)}만원`;
+  }
+  return `${formatMoney(value)}원`;
+}
+
 function formatPercent(value: number, digits = 2) {
   return `${(value * 100).toFixed(digits)}%`;
 }
@@ -706,32 +718,30 @@ export default function Home() {
               확인할 수 있습니다.
             </p>
           </div>
-          <a
-            className="inline-flex items-center rounded border border-[#cfd6e0] bg-white px-4 py-2 text-sm font-semibold text-[#1f4f8f] shadow-sm"
-            href={`${API_BASE_URL}/docs`}
-            rel="noreferrer"
-            target="_blank"
-          >
-            FastAPI Docs
-          </a>
         </header>
 
-        <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-          <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
+        <section className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
+          <div className="rounded border border-[#d9dee7] bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">MVP 통합 상태</h2>
+                <h2 className="text-base font-semibold">현재 MVP 상태</h2>
                 <p className="mt-1 text-sm text-[#6b7280]">
-                  각 vertical slice가 한 대시보드 안에서 연결된 상태를 확인합니다.
+                  기능별 실행 상태와 자산군 준비도를 같은 화면에서 확인합니다.
                 </p>
               </div>
-              <span className="rounded bg-[#eaf2ff] px-3 py-1 text-xs font-semibold text-[#1f4f8f]">
-                활성 자산군 {enabledAssetCount}개
-              </span>
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded bg-[#eaf2ff] px-3 py-1 text-xs font-semibold text-[#1f4f8f]">
+                  활성 자산군 {enabledAssetCount}개
+                </span>
+                <span className="rounded bg-[#eef2f7] px-3 py-1 text-xs font-semibold text-[#5b6675]">
+                  Multi-Asset Ready
+                </span>
+              </div>
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+
+            <div className="mt-4 flex flex-wrap gap-2">
               {readinessItems.map((item) => (
-                <OverviewCard
+                <StatusChip
                   key={item.label}
                   detail={item.detail}
                   label={item.label}
@@ -741,17 +751,14 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+          <div className="rounded border border-[#d9dee7] bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">자산군 준비도</h2>
+                <h2 className="text-base font-semibold">자산군 준비도</h2>
                 <p className="mt-1 text-sm text-[#6b7280]">
-                  UI와 API에서 자산군 경계가 어떻게 표현되는지 보여줍니다.
+                  bond는 활성화되어 있고 stock은 planned 상태입니다.
                 </p>
               </div>
-              <span className="text-xs font-medium text-[#6b7280]">
-                Multi-Asset Ready
-              </span>
             </div>
             <div className="mt-4 space-y-3">
               {assetTypeError ? (
@@ -1672,11 +1679,20 @@ function NumberField({
   step?: string;
   suffix?: string;
 }) {
+  const moneyHint =
+    suffix === "원" && Number.isFinite(value)
+      ? `${formatMoney(value)}원 · ${formatMoneyGuide(value)}`
+      : null;
+
   return (
     <label className="block text-sm font-medium text-[#384252]">
       <div className="flex items-center justify-between gap-3">
         <span>{label}</span>
-        {suffix ? <span className="text-xs text-[#7a8492]">{suffix}</span> : null}
+        {suffix ? (
+          <span className="text-xs text-[#7a8492]">
+            {suffix === "원" ? formatMoneyGuide(value) : suffix}
+          </span>
+        ) : null}
       </div>
       <input
         className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
@@ -1685,6 +1701,9 @@ function NumberField({
         type="number"
         value={value}
       />
+      {moneyHint ? (
+        <span className="mt-2 block text-xs text-[#7a8492]">{moneyHint}</span>
+      ) : null}
     </label>
   );
 }
@@ -1707,7 +1726,7 @@ function MetricCard({
   );
 }
 
-function OverviewCard({
+function StatusChip({
   label,
   detail,
   status,
@@ -1717,20 +1736,29 @@ function OverviewCard({
   status: "ready" | "waiting";
 }) {
   return (
-    <div className="rounded border border-[#d9dee7] bg-[#fafbfc] p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-[#18202a]">{label}</p>
-        <span
-          className={
-            status === "ready"
-              ? "rounded bg-[#e6f4ea] px-2 py-1 text-xs font-semibold text-[#1b6b3a]"
-              : "rounded bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#5b6675]"
-          }
-        >
-          {status === "ready" ? "준비됨" : "대기"}
-        </span>
+    <div className="inline-flex min-w-[180px] items-start gap-3 rounded border border-[#d9dee7] bg-[#fafbfc] px-3 py-2">
+      <span
+        className={
+          status === "ready"
+            ? "mt-1 h-2 w-2 rounded-full bg-[#1b6b3a]"
+            : "mt-1 h-2 w-2 rounded-full bg-[#9aa4b2]"
+        }
+      />
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-semibold text-[#18202a]">{label}</p>
+          <span
+            className={
+              status === "ready"
+                ? "text-xs font-semibold text-[#1b6b3a]"
+                : "text-xs font-semibold text-[#7a8492]"
+            }
+          >
+            {status === "ready" ? "준비됨" : "대기"}
+          </span>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-[#6b7280]">{detail}</p>
       </div>
-      <p className="mt-2 text-xs leading-5 text-[#6b7280]">{detail}</p>
     </div>
   );
 }
