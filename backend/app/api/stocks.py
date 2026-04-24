@@ -4,12 +4,18 @@ from app.data.sample_stocks import get_sample_stock, list_sample_stocks
 from app.schemas.stocks import (
     StockInstrumentsResponse,
     StockMarketDataResponse,
+    StockPortfolioRequest,
+    StockPortfolioResponse,
     StockScenarioRequest,
     StockScenarioResponse,
     StockValuationRequest,
     StockValuationResponse,
 )
-from app.services.stocks import calculate_stock_scenarios, calculate_stock_valuation
+from app.services.stocks import (
+    calculate_stock_portfolio,
+    calculate_stock_scenarios,
+    calculate_stock_valuation,
+)
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
@@ -51,3 +57,8 @@ def post_stock_scenarios(request: StockScenarioRequest) -> StockScenarioResponse
         return calculate_stock_scenarios(request)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/portfolio", response_model=StockPortfolioResponse, deprecated=True)
+def post_stock_portfolio(request: StockPortfolioRequest) -> StockPortfolioResponse:
+    return calculate_stock_portfolio(request)

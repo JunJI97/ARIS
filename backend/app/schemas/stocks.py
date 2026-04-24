@@ -89,3 +89,55 @@ class StockScenarioResponse(BaseModel):
     results: dict[str, float | None]
     interpretation: Interpretation
     series: list[StockScenarioPoint]
+
+
+class StockPortfolioHoldingRequest(BaseModel):
+    ticker: str
+    name: str | None = None
+    market_value: float = Field(gt=0)
+    beta: float = Field(gt=0)
+    expected_return: float = Field(description="Expected annual return")
+
+
+class StockPortfolioRequest(BaseModel):
+    holdings: list[StockPortfolioHoldingRequest] = Field(min_length=1)
+    market_volatility: float = Field(
+        default=0.18,
+        ge=0,
+        le=5,
+        description="Annualized market volatility as a decimal",
+    )
+    holding_period_days: int = Field(default=10, ge=1, le=252)
+
+
+class StockPortfolioHoldingResult(BaseModel):
+    ticker: str
+    name: str | None = None
+    market_value: float
+    weight: float
+    beta: float
+    expected_return: float
+    contribution_to_beta: float
+    contribution_to_return: float
+
+
+class StockPortfolioResults(BaseModel):
+    total_market_value: float
+    portfolio_beta: float
+    expected_return: float
+    largest_weight: float
+    hhi: float
+    concentration_level: str
+    estimated_volatility: float
+    holding_period_volatility: float
+    var_95: float
+    var_99: float
+    loss_percent_95: float
+    loss_percent_99: float
+
+
+class StockPortfolioResponse(BaseModel):
+    inputs: StockPortfolioRequest
+    results: StockPortfolioResults
+    interpretation: Interpretation
+    series: list[StockPortfolioHoldingResult]

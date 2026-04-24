@@ -1,5 +1,8 @@
 from app.schemas.bonds import Interpretation
+from app.schemas.portfolio import PortfolioAnalyzeRequest, PortfolioHoldingRequest
 from app.schemas.stocks import (
+    StockPortfolioRequest,
+    StockPortfolioResponse,
     StockScenarioPoint,
     StockScenarioRequest,
     StockScenarioResponse,
@@ -7,6 +10,7 @@ from app.schemas.stocks import (
     StockValuationResponse,
     StockValuationResults,
 )
+from app.services.portfolio import analyze_portfolio
 
 
 def _round_money(value: float) -> float:
@@ -210,4 +214,76 @@ def calculate_stock_scenarios(
             ],
         ),
         series=series,
+    )
+
+
+def calculate_stock_portfolio(
+    request: StockPortfolioRequest,
+) -> StockPortfolioResponse:
+    portfolio_response = analyze_portfolio(
+        PortfolioAnalyzeRequest(
+            holdings=[
+                PortfolioHoldingRequest(
+                    asset_type="stock",
+                    instrument_id=holding.ticker,
+                    name=holding.name,
+                    market_value=holding.market_value,
+                    expected_return=holding.expected_return,
+                    volatility=request.market_volatility,
+                    beta=holding.beta,
+                )
+                for holding in request.holdings
+            ],
+            holding_period_days=request.holding_period_days,
+        )
+    )
+
+    return StockPortfolioResponse.model_validate(
+        {
+            "inputs": request,
+            "results": {
+                "total_market_value": portfolio_response.results.total_market_value,
+                "portfolio_beta": portfolio_response.results.weighted_beta or 0,
+                "expected_return": portfolio_response.results.expected_return,
+                "largest_weight": portfolio_response.results.largest_weight,
+                "hhi": portfolio_response.results.hhi,
+                "concentration_level": portfolio_response.results.concentration_level,
+                "estimated_volatility": portfolio_response.results.estimated_volatility,
+                "holding_period_volatility": (
+                    portfolio_response.results.holding_period_volatility
+                ),
+                "var_95": portfolio_response.results.var_95,
+                "var_99": portfolio_response.results.var_99,
+                "loss_percent_95": portfolio_response.results.loss_percent_95,
+                "loss_percent_99": portfolio_response.results.loss_percent_99,
+            },
+            "interpretation": {
+                "label": "주식 포트폴리오(deprecated)",
+                "summary": (
+                    "/api/stocks/portfolio는 호환을 위해 유지됩니다. "
+                    "신규 포트폴리오 분석은 /api/portfolio/analyze를 사용합니다."
+                ),
+                "assumptions": [
+                    "stock 전용 holding은 공통 포트폴리오 분석 요청으로 변환됩니다.",
+                    "각 종목 변동성은 요청의 market_volatility 값을 공통 적용합니다.",
+                ],
+            },
+            "series": [
+                {
+                    "ticker": holding.instrument_id,
+                    "name": holding.name,
+                    "market_value": holding.market_value,
+                    "weight": holding.weight,
+                    "beta": holding.beta or 0,
+                    "expected_return": holding.expected_return,
+                    "contribution_to_beta": (
+                        holding.weight * holding.beta
+                        if holding.beta is not None
+                        else 0
+                    ),
+                    "contribution_to_return": holding.contribution_to_return,
+                }
+                for holding in portfolio_response.series
+            ],
+        }
     )

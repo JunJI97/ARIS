@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -17,7 +17,13 @@ import {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-type DashboardTab = "bond" | "stock" | "credit" | "project" | "market";
+type DashboardTab =
+  | "bond"
+  | "stock"
+  | "portfolio"
+  | "credit"
+  | "project"
+  | "market";
 type AssetTypeKey = "bond" | "stock";
 
 type Interpretation = {
@@ -153,6 +159,61 @@ type StockScenarioResponse = {
   };
   interpretation: Interpretation;
   series: StockScenarioPoint[];
+};
+
+type PortfolioHoldingResult = {
+  asset_type: "stock" | "bond";
+  instrument_id: string;
+  name: string | null;
+  market_value: number;
+  weight: number;
+  beta: number | null;
+  duration: number | null;
+  expected_return: number;
+  volatility: number;
+  contribution_to_return: number;
+  contribution_to_variance: number;
+};
+
+type PortfolioHoldingForm = {
+  asset_type: "stock" | "bond";
+  instrument_id: string;
+  ticker: string;
+  name: string;
+  market_value: number;
+  beta: number | null;
+  duration: number | null;
+  expected_return: number;
+  volatility: number;
+};
+
+type PortfolioHoldingView = {
+  holding: PortfolioHoldingForm;
+  sourceIndex: number;
+};
+
+type PortfolioRiskForm = {
+  holding_period_days: number;
+};
+
+type PortfolioAnalyzeResponse = {
+  results: {
+    total_market_value: number;
+    weighted_beta: number | null;
+    weighted_duration: number | null;
+    expected_return: number;
+    largest_weight: number;
+    hhi: number;
+    concentration_level: "diversified" | "watch" | "high";
+    estimated_volatility: number;
+    holding_period_volatility: number;
+    var_95: number;
+    var_99: number;
+    loss_percent_95: number;
+    loss_percent_99: number;
+  };
+  interpretation: Interpretation;
+  series: PortfolioHoldingResult[];
 };
 
 type CreditRiskForm = {
@@ -309,6 +370,20 @@ function formatNumber(value: number, digits = 3) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value);
+}
+
+function calculateCapmReturn(
+  riskFreeRate: number,
+  marketReturn: number,
+  beta: number,
+) {
+  return riskFreeRate + beta * (marketReturn - riskFreeRate);
+}
+
+function concentrationLabel(level: "diversified" | "watch" | "high") {
+  if (level === "diversified") return "분산 양호";
+  if (level === "watch") return "집중 주의";
+  return "고집중";
 }
 
 function toBondPayload(form: BondForm) {
@@ -477,6 +552,13 @@ export default function Home() {
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
   const [stockInstruments, setStockInstruments] = useState<StockInstrument[]>([]);
   const [selectedStockInstrumentId, setSelectedStockInstrumentId] = useState("");
+  const [portfolioHoldings, setPortfolioHoldings] = useState<
+    PortfolioHoldingForm[]
+  >([]);
+  const [portfolioRiskForm, setPortfolioRiskForm] =
+    useState<PortfolioRiskForm>({
+      holding_period_days: 10,
+    });
   const [bondForm, setBondForm] = useState<BondForm>(fallbackBondForm);
   const [stockForm, setStockForm] = useState<StockForm>(fallbackStockForm);
   const [creditForm, setCreditForm] =
@@ -491,6 +573,8 @@ export default function Home() {
     useState<StockValuationResponse | null>(null);
   const [stockScenario, setStockScenario] =
     useState<StockScenarioResponse | null>(null);
+  const [portfolioAnalysis, setPortfolioAnalysis] =
+    useState<PortfolioAnalyzeResponse | null>(null);
   const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
     null,
   );
@@ -501,11 +585,15 @@ export default function Home() {
   );
   const [bondLoading, setBondLoading] = useState(false);
   const [stockLoading, setStockLoading] = useState(false);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [creditLoading, setCreditLoading] = useState(false);
   const [projectLoading, setProjectLoading] = useState(false);
   const [marketLoading, setMarketLoading] = useState(false);
   const [bondError, setBondError] = useState<string | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
+  const [portfolioError, setPortfolioError] = useState<string | null>(
+    null,
+  );
   const [creditError, setCreditError] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [marketError, setMarketError] = useState<string | null>(null);
@@ -528,6 +616,54 @@ export default function Home() {
     [selectedStockInstrumentId, stockInstruments],
   );
 
+  useEffect(() => {
+    if (
+      portfolioHoldings.length > 0 ||
+      stockInstruments.length === 0 ||
+      instruments.length === 0
+    ) {
+      return;
+    }
+
+    const baseStockValues = [50000000, 30000000];
+    const stockHoldings: PortfolioHoldingForm[] = stockInstruments
+      .slice(0, 2)
+      .map((instrument, index) => ({
+        asset_type: "stock",
+        instrument_id: instrument.instrument_id,
+        ticker: instrument.ticker,
+        name: instrument.name,
+        market_value: baseStockValues[index] ?? 10000000,
+        beta: instrument.beta,
+        duration: null,
+        expected_return: calculateCapmReturn(
+          fallbackStockForm.risk_free_rate,
+          fallbackStockForm.market_return,
+          instrument.beta,
+        ),
+        volatility: 0.22,
+      }));
+
+    const bond = instruments[0];
+    const bondHolding: PortfolioHoldingForm | null = bond
+      ? {
+          asset_type: "bond",
+          instrument_id: bond.instrument_id,
+          ticker: bond.name,
+          name: bond.name,
+          market_value: 20000000,
+          beta: null,
+          duration: bond.maturity_years,
+          expected_return: bond.market_yield,
+          volatility: 0.06,
+        }
+      : null;
+
+    setPortfolioHoldings(
+      bondHolding ? [...stockHoldings, bondHolding] : stockHoldings,
+    );
+  }, [instruments, stockInstruments, portfolioHoldings.length]);
+
   const priceGap = useMemo(() => {
     if (!valuation) return null;
     return valuation.results.present_value - bondForm.face_value;
@@ -540,6 +676,22 @@ export default function Home() {
   const enabledAssetCount = assetTypes.filter(
     (assetType) => assetType.status === "enabled",
   ).length;
+
+  const portfolioStockHoldings = useMemo(
+    () =>
+      portfolioHoldings
+        .map((holding, sourceIndex) => ({ holding, sourceIndex }))
+        .filter(({ holding }) => holding.asset_type === "stock"),
+    [portfolioHoldings],
+  );
+
+  const portfolioBondHoldings = useMemo(
+    () =>
+      portfolioHoldings
+        .map((holding, sourceIndex) => ({ holding, sourceIndex }))
+        .filter(({ holding }) => holding.asset_type === "bond"),
+    [portfolioHoldings],
+  );
 
   const readinessItems = [
     {
@@ -816,6 +968,73 @@ export default function Home() {
     }
   }
 
+  async function handlePortfolioCalculate() {
+    if (portfolioHoldings.length === 0) {
+      setPortfolioError("포트폴리오 종목을 먼저 불러와야 합니다.");
+      return;
+    }
+    if (portfolioHoldings.some((holding) => holding.market_value <= 0)) {
+      setPortfolioError("각 종목의 평가금액은 0보다 커야 합니다.");
+      return;
+    }
+    if (
+      portfolioHoldings.some(
+        (holding) => holding.beta !== null && holding.beta <= 0,
+      )
+    ) {
+      setPortfolioError("Beta는 입력하는 경우 0보다 커야 합니다.");
+      return;
+    }
+    if (
+      portfolioHoldings.some(
+        (holding) => holding.duration !== null && holding.duration < 0,
+      )
+    ) {
+      setPortfolioError("Duration은 음수일 수 없습니다.");
+      return;
+    }
+    if (
+      portfolioRiskForm.holding_period_days < 1 ||
+      portfolioRiskForm.holding_period_days > 252
+    ) {
+      setPortfolioError("보유기간은 1일 이상 252일 이하여야 합니다.");
+      return;
+    }
+
+    setPortfolioLoading(true);
+    setPortfolioError(null);
+
+    try {
+      const result = await fetchJson<PortfolioAnalyzeResponse>(
+        "/api/portfolio/analyze",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            holdings: portfolioHoldings.map((holding) => ({
+              asset_type: holding.asset_type,
+              instrument_id: holding.instrument_id,
+              name: holding.name,
+              market_value: holding.market_value,
+              expected_return: holding.expected_return,
+              volatility: holding.volatility,
+              beta: holding.beta,
+              duration: holding.duration,
+            })),
+            holding_period_days: portfolioRiskForm.holding_period_days,
+          }),
+        },
+      );
+
+      setPortfolioAnalysis(result);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류";
+      setPortfolioError(`포트폴리오 계산에 실패했습니다. ${message}`);
+    } finally {
+      setPortfolioLoading(false);
+    }
+  }
+
   async function handleCreditCalculate() {
     const validationMessage = validateCreditRiskForm(creditForm);
     if (validationMessage) {
@@ -917,6 +1136,41 @@ export default function Home() {
     }));
   }
 
+  function updatePortfolioHolding(
+    index: number,
+    key: keyof Pick<
+      PortfolioHoldingForm,
+      "market_value" | "beta" | "duration" | "expected_return" | "volatility"
+    >,
+    value: string,
+  ) {
+    setPortfolioHoldings((current) =>
+      current.map((holding, holdingIndex) =>
+        holdingIndex === index
+          ? {
+              ...holding,
+              [key]:
+                (key === "beta" || key === "duration") && value === ""
+                  ? null
+                  : Number(value),
+            }
+          : holding,
+      ),
+    );
+    setPortfolioAnalysis(null);
+  }
+
+  function updatePortfolioRiskForm(
+    key: keyof PortfolioRiskForm,
+    value: string,
+  ) {
+    setPortfolioRiskForm((current) => ({
+      ...current,
+      [key]: Number(value),
+    }));
+    setPortfolioAnalysis(null);
+  }
+
   function updateCreditForm(key: keyof CreditRiskForm, value: string) {
     setCreditForm((current) => ({
       ...current,
@@ -1008,6 +1262,11 @@ export default function Home() {
               active={activeTab === "stock"}
               label="주식"
               onClick={() => setActiveTab("stock")}
+            />
+            <TabButton
+              active={activeTab === "portfolio"}
+              label="포트폴리오"
+              onClick={() => setActiveTab("portfolio")}
             />
             <TabButton
               active={activeTab === "credit"}
@@ -1753,9 +2012,221 @@ export default function Home() {
                   title="자산군 경계"
                 />
               </div>
+
             </section>
           </section>
-        ) : activeTab === "credit" ? (
+        ) : activeTab === "portfolio" ? (
+          <section className="space-y-4">
+            <section className="rounded border border-[#d9dee7] bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">포트폴리오</h2>
+                  <p className="mt-1 text-sm text-[#6b7280]">
+                    주식과 채권 holding을 함께 넣어 기대수익률, 변동성, VaR, 집중도를 계산합니다.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <NumberField
+                    label="보유기간"
+                    onChange={(value) =>
+                      updatePortfolioRiskForm("holding_period_days", value)
+                    }
+                    step="1"
+                    suffix="일"
+                    value={portfolioRiskForm.holding_period_days}
+                  />
+                  <button
+                    className="h-10 rounded bg-[#1f6feb] px-4 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                    disabled={portfolioLoading}
+                    onClick={handlePortfolioCalculate}
+                    type="button"
+                  >
+                    {portfolioLoading ? "계산 중..." : "계산"}
+                  </button>
+                </div>
+              </div>
+
+              {portfolioError ? (
+                <AlertBox tone="error">{portfolioError}</AlertBox>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                <PortfolioInputPanel
+                  holdings={portfolioStockHoldings}
+                  metricKey="beta"
+                  metricLabel="Beta"
+                  title="주식 holding"
+                  updatePortfolioHolding={updatePortfolioHolding}
+                />
+                <PortfolioInputPanel
+                  holdings={portfolioBondHoldings}
+                  metricKey="duration"
+                  metricLabel="Duration"
+                  title="채권 holding"
+                  updatePortfolioHolding={updatePortfolioHolding}
+                />
+              </div>
+            </section>
+
+            <section className="rounded border border-[#d9dee7] bg-white p-4 shadow-sm">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <CompactMetricCard
+                  hint="전체 평가금액"
+                  label="총 평가금액"
+                  value={
+                    portfolioAnalysis
+                      ? `${formatMoney(portfolioAnalysis.results.total_market_value)} 원`
+                      : "-"
+                  }
+                />
+                <CompactMetricCard
+                  hint="비중 가중평균"
+                  label="기대수익률"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(portfolioAnalysis.results.expected_return, 2)
+                      : "-"
+                  }
+                />
+                <CompactMetricCard
+                  hint="연율 기준"
+                  label="추정 변동성"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(
+                          portfolioAnalysis.results.estimated_volatility,
+                          2,
+                        )
+                      : "-"
+                  }
+                />
+                <CompactMetricCard
+                  hint="95% 신뢰수준"
+                  label="VaR"
+                  value={
+                    portfolioAnalysis
+                      ? `${formatMoney(portfolioAnalysis.results.var_95)} 원`
+                      : "-"
+                  }
+                />
+              </div>
+
+              <div className="mt-3 grid gap-2 text-sm text-[#384252] md:grid-cols-3 xl:grid-cols-6">
+                <PortfolioStat
+                  label="Portfolio Beta"
+                  value={
+                    portfolioAnalysis?.results.weighted_beta !== null &&
+                    portfolioAnalysis?.results.weighted_beta !== undefined
+                      ? formatNumber(portfolioAnalysis.results.weighted_beta, 3)
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="Duration"
+                  value={
+                    portfolioAnalysis?.results.weighted_duration !== null &&
+                    portfolioAnalysis?.results.weighted_duration !== undefined
+                      ? formatNumber(portfolioAnalysis.results.weighted_duration, 2)
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="최대 비중"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(portfolioAnalysis.results.largest_weight, 1)
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="집중도"
+                  value={
+                    portfolioAnalysis
+                      ? concentrationLabel(
+                          portfolioAnalysis.results.concentration_level,
+                        )
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="99% VaR"
+                  value={
+                    portfolioAnalysis
+                      ? `${formatMoney(portfolioAnalysis.results.var_99)} 원`
+                      : "-"
+                  }
+                />
+                <PortfolioStat
+                  label="99% 손실률"
+                  value={
+                    portfolioAnalysis
+                      ? formatPercent(portfolioAnalysis.results.loss_percent_99, 2)
+                      : "-"
+                  }
+                />
+              </div>
+            </section>
+
+            {portfolioAnalysis ? (
+              <section className="overflow-hidden rounded border border-[#d9dee7] bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-[#eef1f5] px-4 py-3">
+                  <h3 className="text-sm font-semibold text-[#18202a]">분석 결과</h3>
+                  <span className="text-xs text-[#6b7280]">
+                    {portfolioAnalysis.series.length} holdings
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] border-collapse text-sm">
+                    <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">자산군</th>
+                        <th className="px-3 py-2 font-semibold">티커</th>
+                        <th className="px-3 py-2 font-semibold">비중</th>
+                        <th className="px-3 py-2 font-semibold">Beta</th>
+                        <th className="px-3 py-2 font-semibold">Duration</th>
+                        <th className="px-3 py-2 font-semibold">변동성</th>
+                        <th className="px-3 py-2 font-semibold">기대수익률</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {portfolioAnalysis.series.map((holding) => (
+                        <tr
+                          className="border-t border-[#eef1f5]"
+                          key={holding.instrument_id}
+                        >
+                          <td className="px-3 py-2">
+                            {holding.asset_type === "stock" ? "주식" : "채권"}
+                          </td>
+                          <td className="px-3 py-2 font-semibold">
+                            {holding.instrument_id}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(holding.weight, 1)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {holding.beta !== null
+                              ? formatNumber(holding.beta, 2)
+                              : "-"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {holding.duration !== null
+                              ? formatNumber(holding.duration, 2)
+                              : "-"}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(holding.volatility, 2)}
+                          </td>
+                          <td className="px-3 py-2">
+                            {formatPercent(holding.expected_return, 2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
+          </section>        ) : activeTab === "credit" ? (
           <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
             <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
@@ -2397,6 +2868,158 @@ function MetricCard({
   );
 }
 
+function CompactMetricCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded border border-[#d9dee7] bg-[#fbfcfe] p-3">
+      <p className="text-xs font-medium text-[#5b6675]">{label}</p>
+      <p className="mt-2 text-xl font-bold text-[#111827]">{value}</p>
+      <p className="mt-1 text-xs text-[#7a8492]">{hint}</p>
+    </div>
+  );
+}
+
+function PortfolioStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded border border-[#e5e7eb] bg-[#fbfcfe] px-3 py-2">
+      <span className="text-xs font-medium text-[#6b7280]">{label}</span>
+      <span className="text-sm font-semibold text-[#111827]">{value}</span>
+    </div>
+  );
+}
+
+function PortfolioInputPanel({
+  title,
+  holdings,
+  metricKey,
+  metricLabel,
+  updatePortfolioHolding,
+}: {
+  title: string;
+  holdings: PortfolioHoldingView[];
+  metricKey: "beta" | "duration";
+  metricLabel: "Beta" | "Duration";
+  updatePortfolioHolding: (
+    index: number,
+    key: keyof Pick<
+      PortfolioHoldingForm,
+      "market_value" | "beta" | "duration" | "expected_return" | "volatility"
+    >,
+    value: string,
+  ) => void;
+}) {
+  return (
+    <section className="rounded border border-[#e5e7eb]">
+      <div className="flex items-center justify-between border-b border-[#eef1f5] px-3 py-2">
+        <h3 className="text-sm font-semibold text-[#18202a]">{title}</h3>
+        <span className="text-xs text-[#6b7280]">{holdings.length} holdings</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] border-collapse text-sm">
+          <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
+            <tr>
+              <th className="px-3 py-2 font-semibold">티커</th>
+              <th className="px-3 py-2 font-semibold">평가금액</th>
+              <th className="px-3 py-2 font-semibold">{metricLabel}</th>
+              <th className="px-3 py-2 font-semibold">변동성</th>
+              <th className="px-3 py-2 font-semibold">기대수익률</th>
+            </tr>
+          </thead>
+          <tbody>
+            {holdings.length === 0 ? (
+              <tr>
+                <td className="px-3 py-4 text-sm text-[#7a8492]" colSpan={5}>
+                  표시할 holding이 없습니다.
+                </td>
+              </tr>
+            ) : (
+              holdings.map(({ holding, sourceIndex }) => (
+                <tr className="border-t border-[#eef1f5]" key={holding.ticker}>
+                  <td className="px-3 py-2">
+                    <div className="font-semibold text-[#111827]">
+                      {holding.ticker}
+                    </div>
+                    <div className="max-w-[160px] truncate text-xs text-[#6b7280]">
+                      {holding.name}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          "market_value",
+                          event.target.value,
+                        )
+                      }
+                      step="1000000"
+                      type="number"
+                      value={holding.market_value}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          metricKey,
+                          event.target.value,
+                        )
+                      }
+                      step={metricKey === "beta" ? "0.01" : "0.1"}
+                      type="number"
+                      value={holding[metricKey] ?? ""}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          "volatility",
+                          event.target.value,
+                        )
+                      }
+                      step="0.01"
+                      type="number"
+                      value={holding.volatility}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      className="w-full rounded border border-[#cfd6e0] px-2 py-1 text-sm outline-none focus:border-[#1f6feb]"
+                      onChange={(event) =>
+                        updatePortfolioHolding(
+                          sourceIndex,
+                          "expected_return",
+                          event.target.value,
+                        )
+                      }
+                      step="0.001"
+                      type="number"
+                      value={holding.expected_return}
+                    />
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function StatusChip({
   label,
   detail,
@@ -2582,3 +3205,5 @@ function TabButton({
     </button>
   );
 }
+
+

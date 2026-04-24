@@ -190,9 +190,124 @@ Response:
 ```json
 {
   "series": [
-    { "yield": 0.03, "price": 10918.22 },
-    { "yield": 0.04, "price": 10449.12 },
-    { "yield": 0.05, "price": 10000.00 }
+    { "growth_shock": -0.01, "growth_rate": 0.02, "gordon_growth_value": 29.14 },
+    { "growth_shock": 0, "growth_rate": 0.03, "gordon_growth_value": 34.33 },
+    { "growth_shock": 0.01, "growth_rate": 0.04, "gordon_growth_value": 41.6 }
+  ]
+}
+```
+
+### `POST /api/stocks/portfolio`
+
+Deprecated. stock-only 호환용 wrapper로 유지하며, 내부 계산은 공통 포트폴리오 분석 로직에 위임한다. 신규 구현은 `POST /api/portfolio/analyze`를 사용한다.
+
+종목별 평가금액, beta, 기대수익률과 시장 변동성 입력을 받아 포트폴리오 beta, 기대수익률, 집중도 리스크, VaR를 계산한다.
+
+Request:
+
+```json
+{
+  "holdings": [
+    {
+      "ticker": "005930.KS",
+      "name": "Samsung Electronics Sample",
+      "market_value": 50000000,
+      "beta": 1.05,
+      "expected_return": 0.0875
+    },
+    {
+      "ticker": "000660.KS",
+      "name": "SK Hynix Sample",
+      "market_value": 30000000,
+      "beta": 1.28,
+      "expected_return": 0.099
+    }
+  ],
+  "market_volatility": 0.2,
+  "holding_period_days": 10
+}
+```
+
+### `POST /api/portfolio/analyze`
+
+주식과 채권 holding을 함께 받아 공통 포트폴리오 지표와 VaR를 계산한다. 신규 포트폴리오 탭은 이 API를 사용한다.
+
+Request:
+
+```json
+{
+  "holdings": [
+    {
+      "asset_type": "stock",
+      "instrument_id": "005930.KS",
+      "name": "Samsung Electronics Sample",
+      "market_value": 60000000,
+      "expected_return": 0.1,
+      "volatility": 0.2,
+      "beta": 1.1
+    },
+    {
+      "asset_type": "bond",
+      "instrument_id": "kr-gov-3y-001",
+      "name": "Korea Treasury Bond 3Y Sample",
+      "market_value": 40000000,
+      "expected_return": 0.04,
+      "volatility": 0.05,
+      "duration": 2.8
+    }
+  ],
+  "holding_period_days": 10
+}
+```
+
+Response:
+
+```json
+{
+  "results": {
+    "total_market_value": 100000000,
+    "expected_return": 0.076,
+    "estimated_volatility": 0.121655,
+    "holding_period_volatility": 0.024234,
+    "weighted_beta": 1.1,
+    "weighted_duration": 2.8,
+    "largest_weight": 0.6,
+    "hhi": 0.52,
+    "concentration_level": "high",
+    "var_95": 3986300.99,
+    "var_99": 5637626.6,
+    "loss_percent_95": 0.039863,
+    "loss_percent_99": 0.056376
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "results": {
+    "total_market_value": 80000000,
+    "portfolio_beta": 1.13625,
+    "expected_return": 0.091812,
+    "largest_weight": 0.625,
+    "hhi": 0.53125,
+    "concentration_level": "high",
+    "estimated_volatility": 0.22725,
+    "holding_period_volatility": 0.045265,
+    "var_95": 5957858.74,
+    "var_99": 8436138.32,
+    "loss_percent_95": 0.074473,
+    "loss_percent_99": 0.105452
+  },
+  "series": [
+    {
+      "ticker": "005930.KS",
+      "market_value": 50000000,
+      "weight": 0.625,
+      "beta": 1.05,
+      "expected_return": 0.0875
+    }
   ]
 }
 ```
