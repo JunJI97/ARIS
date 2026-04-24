@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -161,7 +161,7 @@ type StockScenarioResponse = {
   series: StockScenarioPoint[];
 };
 
-type StockPortfolioHoldingResult = {
+type PortfolioHoldingResult = {
   asset_type: "stock" | "bond";
   instrument_id: string;
   name: string | null;
@@ -175,7 +175,7 @@ type StockPortfolioHoldingResult = {
   contribution_to_variance: number;
 };
 
-type StockPortfolioHoldingForm = {
+type PortfolioHoldingForm = {
   asset_type: "stock" | "bond";
   instrument_id: string;
   ticker: string;
@@ -187,11 +187,11 @@ type StockPortfolioHoldingForm = {
   volatility: number;
 };
 
-type StockPortfolioRiskForm = {
+type PortfolioRiskForm = {
   holding_period_days: number;
 };
 
-type StockPortfolioResponse = {
+type PortfolioAnalyzeResponse = {
   results: {
     total_market_value: number;
     weighted_beta: number | null;
@@ -208,7 +208,7 @@ type StockPortfolioResponse = {
     loss_percent_99: number;
   };
   interpretation: Interpretation;
-  series: StockPortfolioHoldingResult[];
+  series: PortfolioHoldingResult[];
 };
 
 type CreditRiskForm = {
@@ -547,11 +547,11 @@ export default function Home() {
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
   const [stockInstruments, setStockInstruments] = useState<StockInstrument[]>([]);
   const [selectedStockInstrumentId, setSelectedStockInstrumentId] = useState("");
-  const [stockPortfolioHoldings, setStockPortfolioHoldings] = useState<
-    StockPortfolioHoldingForm[]
+  const [portfolioHoldings, setPortfolioHoldings] = useState<
+    PortfolioHoldingForm[]
   >([]);
-  const [stockPortfolioRiskForm, setStockPortfolioRiskForm] =
-    useState<StockPortfolioRiskForm>({
+  const [portfolioRiskForm, setPortfolioRiskForm] =
+    useState<PortfolioRiskForm>({
       holding_period_days: 10,
     });
   const [bondForm, setBondForm] = useState<BondForm>(fallbackBondForm);
@@ -568,8 +568,8 @@ export default function Home() {
     useState<StockValuationResponse | null>(null);
   const [stockScenario, setStockScenario] =
     useState<StockScenarioResponse | null>(null);
-  const [stockPortfolio, setStockPortfolio] =
-    useState<StockPortfolioResponse | null>(null);
+  const [portfolioAnalysis, setPortfolioAnalysis] =
+    useState<PortfolioAnalyzeResponse | null>(null);
   const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
     null,
   );
@@ -580,13 +580,13 @@ export default function Home() {
   );
   const [bondLoading, setBondLoading] = useState(false);
   const [stockLoading, setStockLoading] = useState(false);
-  const [stockPortfolioLoading, setStockPortfolioLoading] = useState(false);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [creditLoading, setCreditLoading] = useState(false);
   const [projectLoading, setProjectLoading] = useState(false);
   const [marketLoading, setMarketLoading] = useState(false);
   const [bondError, setBondError] = useState<string | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
-  const [stockPortfolioError, setStockPortfolioError] = useState<string | null>(
+  const [portfolioError, setPortfolioError] = useState<string | null>(
     null,
   );
   const [creditError, setCreditError] = useState<string | null>(null);
@@ -613,7 +613,7 @@ export default function Home() {
 
   useEffect(() => {
     if (
-      stockPortfolioHoldings.length > 0 ||
+      portfolioHoldings.length > 0 ||
       stockInstruments.length === 0 ||
       instruments.length === 0
     ) {
@@ -621,7 +621,7 @@ export default function Home() {
     }
 
     const baseStockValues = [50000000, 30000000];
-    const stockHoldings: StockPortfolioHoldingForm[] = stockInstruments
+    const stockHoldings: PortfolioHoldingForm[] = stockInstruments
       .slice(0, 2)
       .map((instrument, index) => ({
         asset_type: "stock",
@@ -640,7 +640,7 @@ export default function Home() {
       }));
 
     const bond = instruments[0];
-    const bondHolding: StockPortfolioHoldingForm | null = bond
+    const bondHolding: PortfolioHoldingForm | null = bond
       ? {
           asset_type: "bond",
           instrument_id: bond.instrument_id,
@@ -654,10 +654,10 @@ export default function Home() {
         }
       : null;
 
-    setStockPortfolioHoldings(
+    setPortfolioHoldings(
       bondHolding ? [...stockHoldings, bondHolding] : stockHoldings,
     );
-  }, [instruments, stockInstruments, stockPortfolioHoldings.length]);
+  }, [instruments, stockInstruments, portfolioHoldings.length]);
 
   const priceGap = useMemo(() => {
     if (!valuation) return null;
@@ -947,49 +947,49 @@ export default function Home() {
     }
   }
 
-  async function handleStockPortfolioCalculate() {
-    if (stockPortfolioHoldings.length === 0) {
-      setStockPortfolioError("포트폴리오 종목을 먼저 불러와야 합니다.");
+  async function handlePortfolioCalculate() {
+    if (portfolioHoldings.length === 0) {
+      setPortfolioError("포트폴리오 종목을 먼저 불러와야 합니다.");
       return;
     }
-    if (stockPortfolioHoldings.some((holding) => holding.market_value <= 0)) {
-      setStockPortfolioError("각 종목의 평가금액은 0보다 커야 합니다.");
+    if (portfolioHoldings.some((holding) => holding.market_value <= 0)) {
+      setPortfolioError("각 종목의 평가금액은 0보다 커야 합니다.");
       return;
     }
     if (
-      stockPortfolioHoldings.some(
+      portfolioHoldings.some(
         (holding) => holding.beta !== null && holding.beta <= 0,
       )
     ) {
-      setStockPortfolioError("Beta는 입력하는 경우 0보다 커야 합니다.");
+      setPortfolioError("Beta는 입력하는 경우 0보다 커야 합니다.");
       return;
     }
     if (
-      stockPortfolioHoldings.some(
+      portfolioHoldings.some(
         (holding) => holding.duration !== null && holding.duration < 0,
       )
     ) {
-      setStockPortfolioError("Duration은 음수일 수 없습니다.");
+      setPortfolioError("Duration은 음수일 수 없습니다.");
       return;
     }
     if (
-      stockPortfolioRiskForm.holding_period_days < 1 ||
-      stockPortfolioRiskForm.holding_period_days > 252
+      portfolioRiskForm.holding_period_days < 1 ||
+      portfolioRiskForm.holding_period_days > 252
     ) {
-      setStockPortfolioError("보유기간은 1일 이상 252일 이하여야 합니다.");
+      setPortfolioError("보유기간은 1일 이상 252일 이하여야 합니다.");
       return;
     }
 
-    setStockPortfolioLoading(true);
-    setStockPortfolioError(null);
+    setPortfolioLoading(true);
+    setPortfolioError(null);
 
     try {
-      const result = await fetchJson<StockPortfolioResponse>(
+      const result = await fetchJson<PortfolioAnalyzeResponse>(
         "/api/portfolio/analyze",
         {
           method: "POST",
           body: JSON.stringify({
-            holdings: stockPortfolioHoldings.map((holding) => ({
+            holdings: portfolioHoldings.map((holding) => ({
               asset_type: holding.asset_type,
               instrument_id: holding.instrument_id,
               name: holding.name,
@@ -999,18 +999,18 @@ export default function Home() {
               beta: holding.beta,
               duration: holding.duration,
             })),
-            holding_period_days: stockPortfolioRiskForm.holding_period_days,
+            holding_period_days: portfolioRiskForm.holding_period_days,
           }),
         },
       );
 
-      setStockPortfolio(result);
+      setPortfolioAnalysis(result);
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "알 수 없는 오류";
-      setStockPortfolioError(`주식 포트폴리오 계산에 실패했습니다. ${message}`);
+      setPortfolioError(`포트폴리오 계산에 실패했습니다. ${message}`);
     } finally {
-      setStockPortfolioLoading(false);
+      setPortfolioLoading(false);
     }
   }
 
@@ -1115,15 +1115,15 @@ export default function Home() {
     }));
   }
 
-  function updateStockPortfolioHolding(
+  function updatePortfolioHolding(
     index: number,
     key: keyof Pick<
-      StockPortfolioHoldingForm,
+      PortfolioHoldingForm,
       "market_value" | "beta" | "duration" | "expected_return" | "volatility"
     >,
     value: string,
   ) {
-    setStockPortfolioHoldings((current) =>
+    setPortfolioHoldings((current) =>
       current.map((holding, holdingIndex) =>
         holdingIndex === index
           ? {
@@ -1136,18 +1136,18 @@ export default function Home() {
           : holding,
       ),
     );
-    setStockPortfolio(null);
+    setPortfolioAnalysis(null);
   }
 
-  function updateStockPortfolioRiskForm(
-    key: keyof StockPortfolioRiskForm,
+  function updatePortfolioRiskForm(
+    key: keyof PortfolioRiskForm,
     value: string,
   ) {
-    setStockPortfolioRiskForm((current) => ({
+    setPortfolioRiskForm((current) => ({
       ...current,
       [key]: Number(value),
     }));
-    setStockPortfolio(null);
+    setPortfolioAnalysis(null);
   }
 
   function updateCreditForm(key: keyof CreditRiskForm, value: string) {
@@ -1998,23 +1998,23 @@ export default function Home() {
               <section className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h2 className="text-lg font-semibold">주식 포트폴리오</h2>
+                    <h2 className="text-lg font-semibold">포트폴리오</h2>
                     <p className="mt-1 text-sm text-[#6b7280]">
-                      종목별 평가금액, Beta, 기대수익률을 입력해 포트폴리오 beta와 집중도를 계산합니다.
+                      주식과 채권 holding의 평가금액, 위험 입력값, 기대수익률을 바탕으로 공통 포트폴리오 지표와 VaR를 계산합니다.
                     </p>
                   </div>
                   <button
                     className="rounded bg-[#1f6feb] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
-                    disabled={stockPortfolioLoading}
-                    onClick={handleStockPortfolioCalculate}
+                    disabled={portfolioLoading}
+                    onClick={handlePortfolioCalculate}
                     type="button"
                   >
-                    {stockPortfolioLoading ? "계산 중..." : "포트폴리오 계산"}
+                    {portfolioLoading ? "계산 중..." : "포트폴리오 계산"}
                   </button>
                 </div>
 
-                {stockPortfolioError ? (
-                  <AlertBox tone="error">{stockPortfolioError}</AlertBox>
+                {portfolioError ? (
+                  <AlertBox tone="error">{portfolioError}</AlertBox>
                 ) : null}
 
                 <div className="mt-5 overflow-hidden rounded border border-[#e5e7eb]">
@@ -2031,7 +2031,7 @@ export default function Home() {
                       </tr>
                     </thead>
                     <tbody>
-                      {stockPortfolioHoldings.map((holding, index) => (
+                      {portfolioHoldings.map((holding, index) => (
                         <tr
                           className="border-t border-[#eef1f5]"
                           key={holding.ticker}
@@ -2044,7 +2044,7 @@ export default function Home() {
                             <input
                               className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
                               onChange={(event) =>
-                                updateStockPortfolioHolding(
+                                updatePortfolioHolding(
                                   index,
                                   "market_value",
                                   event.target.value,
@@ -2059,7 +2059,7 @@ export default function Home() {
                             <input
                               className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
                               onChange={(event) =>
-                                updateStockPortfolioHolding(
+                                updatePortfolioHolding(
                                   index,
                                   "beta",
                                   event.target.value,
@@ -2074,7 +2074,7 @@ export default function Home() {
                             <input
                               className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
                               onChange={(event) =>
-                                updateStockPortfolioHolding(
+                                updatePortfolioHolding(
                                   index,
                                   "duration",
                                   event.target.value,
@@ -2089,7 +2089,7 @@ export default function Home() {
                             <input
                               className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
                               onChange={(event) =>
-                                updateStockPortfolioHolding(
+                                updatePortfolioHolding(
                                   index,
                                   "volatility",
                                   event.target.value,
@@ -2104,7 +2104,7 @@ export default function Home() {
                             <input
                               className="w-full rounded border border-[#cfd6e0] px-2 py-1 outline-none focus:border-[#1f6feb]"
                               onChange={(event) =>
-                                updateStockPortfolioHolding(
+                                updatePortfolioHolding(
                                   index,
                                   "expected_return",
                                   event.target.value,
@@ -2125,11 +2125,11 @@ export default function Home() {
                   <NumberField
                     label="보유기간"
                     onChange={(value) =>
-                      updateStockPortfolioRiskForm("holding_period_days", value)
+                      updatePortfolioRiskForm("holding_period_days", value)
                     }
                     step="1"
                     suffix="일"
-                    value={stockPortfolioRiskForm.holding_period_days}
+                    value={portfolioRiskForm.holding_period_days}
                   />
                 </div>
 
@@ -2138,28 +2138,28 @@ export default function Home() {
                     hint="포트폴리오 전체 평가금액입니다."
                     label="총 평가금액"
                     value={
-                      stockPortfolio
-                        ? `${formatMoney(stockPortfolio.results.total_market_value)} 원`
+                      portfolioAnalysis
+                        ? `${formatMoney(portfolioAnalysis.results.total_market_value)} 원`
                         : "-"
                     }
                   />
                   <MetricCard
-                    hint="종목 비중으로 가중평균한 beta입니다."
+                    hint="Beta가 입력된 holding의 비중 가중평균입니다."
                     label="Portfolio Beta"
                     value={
-                      stockPortfolio
-                        ? stockPortfolio.results.weighted_beta !== null
-                          ? formatNumber(stockPortfolio.results.weighted_beta, 3)
+                      portfolioAnalysis
+                        ? portfolioAnalysis.results.weighted_beta !== null
+                          ? formatNumber(portfolioAnalysis.results.weighted_beta, 3)
                           : "-"
                         : "-"
                     }
                   />
                   <MetricCard
-                    hint="종목별 기대수익률의 비중 가중평균입니다."
+                    hint="holding별 기대수익률의 비중 가중평균입니다."
                     label="기대수익률"
                     value={
-                      stockPortfolio
-                        ? formatPercent(stockPortfolio.results.expected_return, 2)
+                      portfolioAnalysis
+                        ? formatPercent(portfolioAnalysis.results.expected_return, 2)
                         : "-"
                     }
                   />
@@ -2167,8 +2167,8 @@ export default function Home() {
                     hint="가장 큰 단일 종목 비중입니다."
                     label="최대 비중"
                     value={
-                      stockPortfolio
-                        ? formatPercent(stockPortfolio.results.largest_weight, 1)
+                      portfolioAnalysis
+                        ? formatPercent(portfolioAnalysis.results.largest_weight, 1)
                         : "-"
                     }
                   />
@@ -2176,9 +2176,9 @@ export default function Home() {
                     hint="채권 holding 비중으로 가중평균한 duration입니다."
                     label="Duration"
                     value={
-                      stockPortfolio?.results.weighted_duration !== null &&
-                      stockPortfolio?.results.weighted_duration !== undefined
-                        ? formatNumber(stockPortfolio.results.weighted_duration, 2)
+                      portfolioAnalysis?.results.weighted_duration !== null &&
+                      portfolioAnalysis?.results.weighted_duration !== undefined
+                        ? formatNumber(portfolioAnalysis.results.weighted_duration, 2)
                         : "-"
                     }
                   />
@@ -2186,9 +2186,9 @@ export default function Home() {
                     hint="HHI 기반 집중도 판정입니다."
                     label="집중도"
                     value={
-                      stockPortfolio
+                      portfolioAnalysis
                         ? concentrationLabel(
-                            stockPortfolio.results.concentration_level,
+                            portfolioAnalysis.results.concentration_level,
                           )
                         : "-"
                     }
@@ -2200,8 +2200,8 @@ export default function Home() {
                     hint="Portfolio beta와 시장 변동성으로 추정한 연율 변동성입니다."
                     label="추정 변동성"
                     value={
-                      stockPortfolio
-                        ? formatPercent(stockPortfolio.results.estimated_volatility, 2)
+                      portfolioAnalysis
+                        ? formatPercent(portfolioAnalysis.results.estimated_volatility, 2)
                         : "-"
                     }
                   />
@@ -2209,9 +2209,9 @@ export default function Home() {
                     hint="보유기간에 맞게 환산한 변동성입니다."
                     label="보유기간 변동성"
                     value={
-                      stockPortfolio
+                      portfolioAnalysis
                         ? formatPercent(
-                            stockPortfolio.results.holding_period_volatility,
+                            portfolioAnalysis.results.holding_period_volatility,
                             2,
                           )
                         : "-"
@@ -2221,8 +2221,8 @@ export default function Home() {
                     hint="95% 신뢰수준의 parametric VaR입니다."
                     label="95% VaR"
                     value={
-                      stockPortfolio
-                        ? `${formatMoney(stockPortfolio.results.var_95)} 원`
+                      portfolioAnalysis
+                        ? `${formatMoney(portfolioAnalysis.results.var_95)} 원`
                         : "-"
                     }
                   />
@@ -2230,8 +2230,8 @@ export default function Home() {
                     hint="99% 신뢰수준의 parametric VaR입니다."
                     label="99% VaR"
                     value={
-                      stockPortfolio
-                        ? `${formatMoney(stockPortfolio.results.var_99)} 원`
+                      portfolioAnalysis
+                        ? `${formatMoney(portfolioAnalysis.results.var_99)} 원`
                         : "-"
                     }
                   />
@@ -2239,14 +2239,14 @@ export default function Home() {
                     hint="99% VaR의 포트폴리오 대비 손실률입니다."
                     label="99% 손실률"
                     value={
-                      stockPortfolio
-                        ? formatPercent(stockPortfolio.results.loss_percent_99, 2)
+                      portfolioAnalysis
+                        ? formatPercent(portfolioAnalysis.results.loss_percent_99, 2)
                         : "-"
                     }
                   />
                 </div>
 
-                {stockPortfolio ? (
+                {portfolioAnalysis ? (
                   <div className="mt-5 overflow-hidden rounded border border-[#e5e7eb]">
                     <table className="w-full border-collapse text-sm">
                       <thead className="bg-[#f9fafb] text-left text-[#5b6675]">
@@ -2260,7 +2260,7 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody>
-                        {stockPortfolio.series.map((holding) => (
+                        {portfolioAnalysis.series.map((holding) => (
                           <tr
                             className="border-t border-[#eef1f5]"
                             key={holding.instrument_id}
@@ -3119,3 +3119,4 @@ function TabButton({
     </button>
   );
 }
+
