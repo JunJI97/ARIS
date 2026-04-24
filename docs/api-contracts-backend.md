@@ -76,6 +76,115 @@ Request:
 }
 ```
 
+### `GET /api/stocks/instruments`
+
+Returns sample stock instruments for the stock foundation.
+
+Response:
+
+```json
+{
+  "instruments": [
+    {
+      "instrument_id": "kr-equity-005930",
+      "ticker": "005930.KS",
+      "name": "Samsung Electronics Sample",
+      "exchange": "KRX",
+      "currency": "KRW",
+      "last_price": 72000,
+      "shares_outstanding": 5969782550,
+      "eps_ttm": 5200,
+      "book_value_per_share": 48000,
+      "dividend_per_share": 1444,
+      "beta": 1.05,
+      "expected_growth_rate": 0.035
+    }
+  ]
+}
+```
+
+### `GET /api/stocks/market-data`
+
+Returns one sample stock instrument and fallback metadata.
+
+Query:
+
+```text
+instrument_id=kr-equity-005930
+```
+
+### `POST /api/stocks/valuation`
+
+Calculates core stock valuation metrics.
+
+Request:
+
+```json
+{
+  "current_price": 100,
+  "eps": 8,
+  "book_value_per_share": 50,
+  "dividend_per_share": 2,
+  "required_return": 0.09,
+  "risk_free_rate": 0.03,
+  "market_return": 0.08,
+  "beta": 1.2,
+  "growth_rate": 0.03,
+  "target_pe": 14,
+  "target_pb": 1.8,
+  "shares_outstanding": 1000000,
+  "investment_amount": 10000
+}
+```
+
+Response:
+
+```json
+{
+  "results": {
+    "market_cap": 100000000,
+    "price_to_earnings": 12.5,
+    "price_to_book": 2,
+    "dividend_yield": 0.02,
+    "earnings_yield": 0.08,
+    "capm_required_return": 0.09,
+    "effective_required_return": 0.09,
+    "gordon_growth_value": 34.33,
+    "fair_value_by_pe": 112,
+    "fair_value_by_pb": 90,
+    "upside_by_gordon": -0.656667,
+    "upside_by_pe": 0.12,
+    "upside_by_pb": -0.1,
+    "estimated_shares": 100
+  }
+}
+```
+
+### `POST /api/stocks/scenarios`
+
+Applies growth-rate shocks and recalculates Gordon growth value.
+
+Request:
+
+```json
+{
+  "current_price": 100,
+  "eps": 8,
+  "book_value_per_share": 50,
+  "dividend_per_share": 2,
+  "required_return": 0.09,
+  "risk_free_rate": 0.03,
+  "market_return": 0.08,
+  "beta": 1.2,
+  "growth_rate": 0.03,
+  "target_pe": 14,
+  "target_pb": 1.8,
+  "min_growth_shock": -0.01,
+  "max_growth_shock": 0.01,
+  "steps": 5
+}
+```
+
 Response:
 
 ```json

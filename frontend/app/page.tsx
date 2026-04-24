@@ -17,7 +17,7 @@ import {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-type DashboardTab = "bond" | "credit" | "project" | "market";
+type DashboardTab = "bond" | "stock" | "credit" | "project" | "market";
 type AssetTypeKey = "bond" | "stock";
 
 type Interpretation = {
@@ -85,6 +85,74 @@ type BondScenarioResponse = {
   };
   interpretation: Interpretation;
   series: BondScenarioPoint[];
+};
+
+type StockInstrument = {
+  instrument_id: string;
+  ticker: string;
+  name: string;
+  exchange: string;
+  currency: string;
+  last_price: number;
+  shares_outstanding: number;
+  eps_ttm: number;
+  book_value_per_share: number;
+  dividend_per_share: number;
+  beta: number;
+  expected_growth_rate: number;
+};
+
+type StockForm = {
+  current_price: number;
+  eps: number;
+  book_value_per_share: number;
+  dividend_per_share: number;
+  required_return: number;
+  risk_free_rate: number;
+  market_return: number;
+  beta: number;
+  growth_rate: number;
+  target_pe: number;
+  target_pb: number;
+  shares_outstanding: number;
+  investment_amount: number;
+  min_growth_shock: number;
+  max_growth_shock: number;
+  steps: number;
+};
+
+type StockValuationResponse = {
+  results: {
+    market_cap: number | null;
+    price_to_earnings: number | null;
+    price_to_book: number;
+    dividend_yield: number;
+    earnings_yield: number | null;
+    capm_required_return: number;
+    effective_required_return: number;
+    gordon_growth_value: number | null;
+    fair_value_by_pe: number | null;
+    fair_value_by_pb: number | null;
+    upside_by_gordon: number | null;
+    upside_by_pe: number | null;
+    upside_by_pb: number | null;
+    estimated_shares: number | null;
+  };
+  interpretation: Interpretation;
+};
+
+type StockScenarioPoint = {
+  growth_shock: number;
+  growth_rate: number;
+  gordon_growth_value: number | null;
+};
+
+type StockScenarioResponse = {
+  results: {
+    base_gordon_growth_value: number | null;
+  };
+  interpretation: Interpretation;
+  series: StockScenarioPoint[];
 };
 
 type CreditRiskForm = {
@@ -173,6 +241,25 @@ const fallbackBondForm: BondForm = {
   steps: 9,
 };
 
+const fallbackStockForm: StockForm = {
+  current_price: 72000,
+  eps: 5200,
+  book_value_per_share: 48000,
+  dividend_per_share: 1444,
+  required_return: 0.09,
+  risk_free_rate: 0.035,
+  market_return: 0.085,
+  beta: 1.05,
+  growth_rate: 0.035,
+  target_pe: 14,
+  target_pb: 1.6,
+  shares_outstanding: 5969782550,
+  investment_amount: 1000000,
+  min_growth_shock: -0.03,
+  max_growth_shock: 0.03,
+  steps: 7,
+};
+
 const fallbackCreditForm: CreditRiskForm = {
   debt_ratio: 0.55,
   current_ratio: 1.35,
@@ -235,6 +322,24 @@ function toBondPayload(form: BondForm) {
   };
 }
 
+function toStockPayload(form: StockForm) {
+  return {
+    current_price: Number(form.current_price),
+    eps: Number(form.eps),
+    book_value_per_share: Number(form.book_value_per_share),
+    dividend_per_share: Number(form.dividend_per_share),
+    required_return: Number(form.required_return),
+    risk_free_rate: Number(form.risk_free_rate),
+    market_return: Number(form.market_return),
+    beta: Number(form.beta),
+    growth_rate: Number(form.growth_rate),
+    target_pe: Number(form.target_pe),
+    target_pb: Number(form.target_pb),
+    shares_outstanding: Number(form.shares_outstanding),
+    investment_amount: Number(form.investment_amount),
+  };
+}
+
 function parseCashFlows(text: string): number[] {
   return text
     .split(",")
@@ -255,6 +360,24 @@ function validateBondForm(form: BondForm): string | null {
   }
   if (form.steps < 3) return "시나리오 개수는 3 이상이어야 합니다.";
   if (form.steps > 25) return "시나리오 개수는 25 이하여야 합니다.";
+  return null;
+}
+
+function validateStockForm(form: StockForm): string | null {
+  if (form.current_price <= 0) return "현재가는 0보다 커야 합니다.";
+  if (form.book_value_per_share <= 0) return "주당 순자산은 0보다 커야 합니다.";
+  if (form.dividend_per_share < 0) return "주당 배당금은 음수일 수 없습니다.";
+  if (form.required_return <= 0) return "요구수익률은 0보다 커야 합니다.";
+  if (form.beta <= 0) return "Beta는 0보다 커야 합니다.";
+  if (form.target_pe <= 0) return "Target P/E는 0보다 커야 합니다.";
+  if (form.target_pb <= 0) return "Target P/B는 0보다 커야 합니다.";
+  if (form.shares_outstanding <= 0) return "발행주식 수는 0보다 커야 합니다.";
+  if (form.investment_amount <= 0) return "투자금액은 0보다 커야 합니다.";
+  if (form.min_growth_shock >= form.max_growth_shock) {
+    return "최소 성장률 충격은 최대 성장률 충격보다 작아야 합니다.";
+  }
+  if (form.steps < 3) return "시나리오 개수는 3개 이상이어야 합니다.";
+  if (form.steps > 25) return "시나리오 개수는 25개 이하여야 합니다.";
   return null;
 }
 
@@ -352,7 +475,10 @@ export default function Home() {
   const [assetTypeError, setAssetTypeError] = useState<string | null>(null);
   const [instruments, setInstruments] = useState<BondInstrument[]>([]);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState("");
+  const [stockInstruments, setStockInstruments] = useState<StockInstrument[]>([]);
+  const [selectedStockInstrumentId, setSelectedStockInstrumentId] = useState("");
   const [bondForm, setBondForm] = useState<BondForm>(fallbackBondForm);
+  const [stockForm, setStockForm] = useState<StockForm>(fallbackStockForm);
   const [creditForm, setCreditForm] =
     useState<CreditRiskForm>(fallbackCreditForm);
   const [projectForm, setProjectForm] =
@@ -361,6 +487,10 @@ export default function Home() {
     useState<MarketRiskForm>(fallbackMarketForm);
   const [valuation, setValuation] = useState<BondValuationResponse | null>(null);
   const [scenario, setScenario] = useState<BondScenarioResponse | null>(null);
+  const [stockValuation, setStockValuation] =
+    useState<StockValuationResponse | null>(null);
+  const [stockScenario, setStockScenario] =
+    useState<StockScenarioResponse | null>(null);
   const [creditResult, setCreditResult] = useState<CreditRiskResponse | null>(
     null,
   );
@@ -370,10 +500,12 @@ export default function Home() {
     null,
   );
   const [bondLoading, setBondLoading] = useState(false);
+  const [stockLoading, setStockLoading] = useState(false);
   const [creditLoading, setCreditLoading] = useState(false);
   const [projectLoading, setProjectLoading] = useState(false);
   const [marketLoading, setMarketLoading] = useState(false);
   const [bondError, setBondError] = useState<string | null>(null);
+  const [stockError, setStockError] = useState<string | null>(null);
   const [creditError, setCreditError] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [marketError, setMarketError] = useState<string | null>(null);
@@ -385,6 +517,15 @@ export default function Home() {
         (instrument) => instrument.instrument_id === selectedInstrumentId,
       ),
     [instruments, selectedInstrumentId],
+  );
+
+  const selectedStockInstrument = useMemo(
+    () =>
+      stockInstruments.find(
+        (instrument) =>
+          instrument.instrument_id === selectedStockInstrumentId,
+      ),
+    [selectedStockInstrumentId, stockInstruments],
   );
 
   const priceGap = useMemo(() => {
@@ -497,6 +638,33 @@ export default function Home() {
         }
       });
 
+    fetchJson<{ instruments: StockInstrument[] }>("/api/stocks/instruments")
+      .then((payload) => {
+        if (!mounted) return;
+
+        setStockInstruments(payload.instruments);
+        const firstInstrument = payload.instruments[0];
+
+        if (firstInstrument) {
+          setSelectedStockInstrumentId(firstInstrument.instrument_id);
+          setStockForm((current) => ({
+            ...current,
+            current_price: firstInstrument.last_price,
+            eps: firstInstrument.eps_ttm,
+            book_value_per_share: firstInstrument.book_value_per_share,
+            dividend_per_share: firstInstrument.dividend_per_share,
+            beta: firstInstrument.beta,
+            growth_rate: firstInstrument.expected_growth_rate,
+            shares_outstanding: firstInstrument.shares_outstanding,
+          }));
+        }
+      })
+      .catch((caught: Error) => {
+        if (mounted) {
+          setStockError(`주식 목록을 불러오지 못했습니다. ${caught.message}`);
+        }
+      });
+
     return () => {
       mounted = false;
     };
@@ -575,6 +743,76 @@ export default function Home() {
       setBondError(`계산에 실패했습니다. ${message}`);
     } finally {
       setBondLoading(false);
+    }
+  }
+
+  async function handleSelectStockInstrument(instrumentId: string) {
+    setSelectedStockInstrumentId(instrumentId);
+    setStockError(null);
+
+    try {
+      const payload = await fetchJson<{ instrument: StockInstrument }>(
+        `/api/stocks/market-data?instrument_id=${encodeURIComponent(instrumentId)}`,
+      );
+
+      setStockForm((current) => ({
+        ...current,
+        current_price: payload.instrument.last_price,
+        eps: payload.instrument.eps_ttm,
+        book_value_per_share: payload.instrument.book_value_per_share,
+        dividend_per_share: payload.instrument.dividend_per_share,
+        beta: payload.instrument.beta,
+        growth_rate: payload.instrument.expected_growth_rate,
+        shares_outstanding: payload.instrument.shares_outstanding,
+      }));
+
+      setStockValuation(null);
+      setStockScenario(null);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류";
+      setStockError(`주식 데이터를 불러오지 못했습니다. ${message}`);
+    }
+  }
+
+  async function handleStockCalculate() {
+    const validationMessage = validateStockForm(stockForm);
+    if (validationMessage) {
+      setStockError(validationMessage);
+      return;
+    }
+
+    setStockLoading(true);
+    setStockError(null);
+
+    try {
+      const valuationPayload = toStockPayload(stockForm);
+      const scenarioPayload = {
+        ...valuationPayload,
+        min_growth_shock: Number(stockForm.min_growth_shock),
+        max_growth_shock: Number(stockForm.max_growth_shock),
+        steps: Number(stockForm.steps),
+      };
+
+      const [valuationResult, scenarioResult] = await Promise.all([
+        fetchJson<StockValuationResponse>("/api/stocks/valuation", {
+          method: "POST",
+          body: JSON.stringify(valuationPayload),
+        }),
+        fetchJson<StockScenarioResponse>("/api/stocks/scenarios", {
+          method: "POST",
+          body: JSON.stringify(scenarioPayload),
+        }),
+      ]);
+
+      setStockValuation(valuationResult);
+      setStockScenario(scenarioResult);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "알 수 없는 오류";
+      setStockError(`주식 가치평가에 실패했습니다. ${message}`);
+    } finally {
+      setStockLoading(false);
     }
   }
 
@@ -672,6 +910,13 @@ export default function Home() {
     }));
   }
 
+  function updateStockForm(key: keyof StockForm, value: string) {
+    setStockForm((current) => ({
+      ...current,
+      [key]: Number(value),
+    }));
+  }
+
   function updateCreditForm(key: keyof CreditRiskForm, value: string) {
     setCreditForm((current) => ({
       ...current,
@@ -758,6 +1003,11 @@ export default function Home() {
               active={activeTab === "bond"}
               label="채권"
               onClick={() => setActiveTab("bond")}
+            />
+            <TabButton
+              active={activeTab === "stock"}
+              label="주식"
+              onClick={() => setActiveTab("stock")}
             />
             <TabButton
               active={activeTab === "credit"}
@@ -1059,6 +1309,447 @@ export default function Home() {
                     "채권 valuation 로직은 bond 전용 서비스로 분리되어 있습니다.",
                   ]}
                   summary="수익률과 표면금리는 decimal 값으로 입력합니다. 채권 valuation은 자산군 전용 계산이고 공통 위험 지표와는 경계를 분리해 유지합니다."
+                  title="자산군 경계"
+                />
+              </div>
+            </section>
+          </section>
+        ) : activeTab === "stock" ? (
+          <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
+            <aside className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">주식 입력</h2>
+                {selectedStockInstrument ? (
+                  <span className="rounded bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#384252]">
+                    {selectedStockInstrument.ticker}
+                  </span>
+                ) : null}
+              </div>
+
+              <label className="mt-5 block text-sm font-medium text-[#384252]">
+                샘플 종목
+                <select
+                  className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
+                  onChange={(event) =>
+                    handleSelectStockInstrument(event.target.value)
+                  }
+                  value={selectedStockInstrumentId}
+                >
+                  {stockInstruments.length === 0 ? (
+                    <option value="">백엔드 연결 대기 중</option>
+                  ) : null}
+                  {stockInstruments.map((instrument) => (
+                    <option
+                      key={instrument.instrument_id}
+                      value={instrument.instrument_id}
+                    >
+                      {instrument.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedStockInstrument ? (
+                <div className="mt-3 rounded border border-[#e5e7eb] bg-[#f9fafb] p-3 text-xs leading-5 text-[#5b6675]">
+                  <div>거래소: {selectedStockInstrument.exchange}</div>
+                  <div>통화: {selectedStockInstrument.currency}</div>
+                  <div>Beta: {formatNumber(selectedStockInstrument.beta, 2)}</div>
+                  <div>
+                    예상 성장률:{" "}
+                    {formatPercent(selectedStockInstrument.expected_growth_rate)}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-5 grid gap-4">
+                <NumberField
+                  label="투자금액"
+                  onChange={(value) => updateStockForm("investment_amount", value)}
+                  suffix="원"
+                  value={stockForm.investment_amount}
+                />
+                <NumberField
+                  label="현재가"
+                  onChange={(value) => updateStockForm("current_price", value)}
+                  suffix={selectedStockInstrument?.currency ?? "가격"}
+                  value={stockForm.current_price}
+                />
+                <NumberField
+                  label="EPS"
+                  onChange={(value) => updateStockForm("eps", value)}
+                  step="0.01"
+                  value={stockForm.eps}
+                />
+                <NumberField
+                  label="주당 순자산"
+                  onChange={(value) =>
+                    updateStockForm("book_value_per_share", value)
+                  }
+                  step="0.01"
+                  value={stockForm.book_value_per_share}
+                />
+                <NumberField
+                  label="주당 배당금"
+                  onChange={(value) =>
+                    updateStockForm("dividend_per_share", value)
+                  }
+                  step="0.01"
+                  value={stockForm.dividend_per_share}
+                />
+                <NumberField
+                  label="요구수익률"
+                  onChange={(value) => updateStockForm("required_return", value)}
+                  step="0.001"
+                  suffix="decimal"
+                  value={stockForm.required_return}
+                />
+                <NumberField
+                  label="Beta"
+                  onChange={(value) => updateStockForm("beta", value)}
+                  step="0.01"
+                  value={stockForm.beta}
+                />
+                <NumberField
+                  label="무위험수익률"
+                  onChange={(value) => updateStockForm("risk_free_rate", value)}
+                  step="0.001"
+                  suffix="decimal"
+                  value={stockForm.risk_free_rate}
+                />
+                <NumberField
+                  label="시장기대수익률"
+                  onChange={(value) => updateStockForm("market_return", value)}
+                  step="0.001"
+                  suffix="decimal"
+                  value={stockForm.market_return}
+                />
+                <NumberField
+                  label="성장률"
+                  onChange={(value) => updateStockForm("growth_rate", value)}
+                  step="0.001"
+                  suffix="decimal"
+                  value={stockForm.growth_rate}
+                />
+                <NumberField
+                  label="Target P/E"
+                  onChange={(value) => updateStockForm("target_pe", value)}
+                  step="0.1"
+                  value={stockForm.target_pe}
+                />
+                <NumberField
+                  label="Target P/B"
+                  onChange={(value) => updateStockForm("target_pb", value)}
+                  step="0.1"
+                  value={stockForm.target_pb}
+                />
+              </div>
+
+              <details className="mt-5 rounded border border-[#d9dee7] bg-[#fafbfc] p-4">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  시나리오 설정
+                </summary>
+                <div className="mt-4 grid gap-4">
+                  <NumberField
+                    label="발행주식 수"
+                    onChange={(value) =>
+                      updateStockForm("shares_outstanding", value)
+                    }
+                    step="1"
+                    value={stockForm.shares_outstanding}
+                  />
+                  <NumberField
+                    label="최소 성장률 충격"
+                    onChange={(value) =>
+                      updateStockForm("min_growth_shock", value)
+                    }
+                    step="0.005"
+                    suffix="decimal"
+                    value={stockForm.min_growth_shock}
+                  />
+                  <NumberField
+                    label="최대 성장률 충격"
+                    onChange={(value) =>
+                      updateStockForm("max_growth_shock", value)
+                    }
+                    step="0.005"
+                    suffix="decimal"
+                    value={stockForm.max_growth_shock}
+                  />
+                  <NumberField
+                    label="시나리오 개수"
+                    onChange={(value) => updateStockForm("steps", value)}
+                    step="1"
+                    value={stockForm.steps}
+                  />
+                </div>
+              </details>
+
+              <button
+                className="mt-5 w-full rounded bg-[#1f6feb] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#195bc2] disabled:cursor-not-allowed disabled:bg-[#9ab7e6]"
+                disabled={stockLoading}
+                onClick={handleStockCalculate}
+              >
+                {stockLoading ? "계산 중..." : "주식 가치평가 실행"}
+              </button>
+
+              {stockError ? <AlertBox tone="error">{stockError}</AlertBox> : null}
+            </aside>
+
+            <section className="flex flex-col gap-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <MetricCard
+                  hint="현재가를 최근 EPS로 나눈 배수입니다."
+                  label="P/E"
+                  value={
+                    stockValuation?.results.price_to_earnings !== null &&
+                    stockValuation?.results.price_to_earnings !== undefined
+                      ? formatNumber(stockValuation.results.price_to_earnings, 2)
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="현재가를 주당 순자산으로 나눈 배수입니다."
+                  label="P/B"
+                  value={
+                    stockValuation
+                      ? formatNumber(stockValuation.results.price_to_book, 2)
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="주당 배당금을 현재가로 나눈 비율입니다."
+                  label="배당수익률"
+                  value={
+                    stockValuation
+                      ? formatPercent(stockValuation.results.dividend_yield, 2)
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="CAPM으로 산출한 요구수익률입니다."
+                  label="CAPM 요구수익률"
+                  value={
+                    stockValuation
+                      ? formatPercent(
+                          stockValuation.results.capm_required_return,
+                          2,
+                        )
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="입력된 요구수익률이 valuation에 적용됩니다."
+                  label="적용 요구수익률"
+                  value={
+                    stockValuation
+                      ? formatPercent(
+                          stockValuation.results.effective_required_return,
+                          2,
+                        )
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="Gordon growth 배당할인모형 추정값입니다."
+                  label="Gordon Value"
+                  value={
+                    stockValuation?.results.gordon_growth_value !== null &&
+                    stockValuation?.results.gordon_growth_value !== undefined
+                      ? formatMoney(stockValuation.results.gordon_growth_value)
+                      : "-"
+                  }
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <MetricCard
+                  hint="EPS에 target P/E를 적용한 상대가치평가 적정가입니다."
+                  label="P/E 적정가"
+                  value={
+                    stockValuation?.results.fair_value_by_pe
+                      ? formatMoney(stockValuation.results.fair_value_by_pe)
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="주당 순자산에 target P/B를 적용한 상대가치평가 적정가입니다."
+                  label="P/B 적정가"
+                  value={
+                    stockValuation?.results.fair_value_by_pb
+                      ? formatMoney(stockValuation.results.fair_value_by_pb)
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="P/E 적정가의 현재가 대비 괴리율입니다."
+                  label="P/E 괴리율"
+                  value={
+                    stockValuation?.results.upside_by_pe !== null &&
+                    stockValuation?.results.upside_by_pe !== undefined
+                      ? formatPercent(stockValuation.results.upside_by_pe, 2)
+                      : "-"
+                  }
+                />
+                <MetricCard
+                  hint="P/B 적정가의 현재가 대비 괴리율입니다."
+                  label="P/B 괴리율"
+                  value={
+                    stockValuation?.results.upside_by_pb !== null &&
+                    stockValuation?.results.upside_by_pb !== undefined
+                      ? formatPercent(stockValuation.results.upside_by_pb, 2)
+                      : "-"
+                  }
+                />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <ChartPanel
+                  description="성장률 충격을 배당할인모형에 적용해 가치 변화를 확인합니다."
+                  title="성장률 시나리오"
+                >
+                  {stockScenario ? (
+                    <ResponsiveContainer height="100%" width="100%">
+                      <LineChart
+                        data={stockScenario.series.map((point) => ({
+                          ...point,
+                          shockLabel: `${(point.growth_shock * 100).toFixed(1)}%p`,
+                          valueForChart: point.gordon_growth_value,
+                        }))}
+                        margin={{ top: 12, right: 16, bottom: 8, left: 8 }}
+                      >
+                        <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                        {stockScenario.results.base_gordon_growth_value ? (
+                          <ReferenceLine
+                            stroke="#94a3b8"
+                            y={stockScenario.results.base_gordon_growth_value}
+                          />
+                        ) : null}
+                        <XAxis
+                          dataKey="shockLabel"
+                          tick={{ fill: "#5b6675", fontSize: 12 }}
+                        />
+                        <YAxis
+                          tick={{ fill: "#5b6675", fontSize: 12 }}
+                          tickFormatter={(value) => formatMoney(Number(value))}
+                          width={82}
+                        />
+                        <Tooltip
+                          formatter={(value, key) => {
+                            if (key === "valueForChart") {
+                              return [
+                                value === null
+                                  ? "-"
+                                  : formatMoney(Number(value)),
+                                "Gordon value",
+                              ];
+                            }
+                            return [value, key];
+                          }}
+                          labelFormatter={(label) => `성장률 충격 ${label}`}
+                        />
+                        <Line
+                          activeDot={{ r: 5 }}
+                          dataKey="valueForChart"
+                          dot={{ r: 3 }}
+                          stroke="#1f6feb"
+                          strokeWidth={3}
+                          type="monotone"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChart message="가치평가를 실행하면 성장률 시나리오가 표시됩니다." />
+                  )}
+                </ChartPanel>
+
+                <SummaryPanel title="주식 요약">
+                  <SummaryRow
+                    label="티커"
+                    value={selectedStockInstrument?.ticker ?? "-"}
+                  />
+                  <SummaryRow
+                    label="시가총액"
+                    value={
+                      stockValuation?.results.market_cap
+                        ? formatMoney(stockValuation.results.market_cap)
+                        : "-"
+                    }
+                  />
+                  <SummaryRow
+                    label="예상 주식 수"
+                    value={
+                      stockValuation?.results.estimated_shares
+                        ? formatNumber(stockValuation.results.estimated_shares, 3)
+                        : "-"
+                    }
+                  />
+                  <SummaryRow
+                    label="이익수익률"
+                    value={
+                      stockValuation?.results.earnings_yield !== null &&
+                      stockValuation?.results.earnings_yield !== undefined
+                        ? formatPercent(stockValuation.results.earnings_yield, 2)
+                        : "-"
+                    }
+                  />
+                  <SummaryRow
+                    label="요구수익률"
+                    value={formatPercent(stockForm.required_return)}
+                  />
+                  <SummaryRow
+                    label="CAPM"
+                    value={`${formatPercent(stockForm.risk_free_rate)} + ${formatNumber(
+                      stockForm.beta,
+                      2,
+                    )} x (${formatPercent(stockForm.market_return)} - ${formatPercent(
+                      stockForm.risk_free_rate,
+                    )})`}
+                  />
+                  <SummaryRow
+                    label="Target Multiple"
+                    value={`P/E ${formatNumber(stockForm.target_pe, 1)}, P/B ${formatNumber(
+                      stockForm.target_pb,
+                      1,
+                    )}`}
+                  />
+                  <SummaryRow
+                    label="성장률 범위"
+                    value={`${formatPercent(
+                      stockForm.growth_rate + stockForm.min_growth_shock,
+                    )} ~ ${formatPercent(
+                      stockForm.growth_rate + stockForm.max_growth_shock,
+                    )}`}
+                  />
+                </SummaryPanel>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <InterpretationPanel
+                  assumptions={stockValuation?.interpretation.assumptions ?? []}
+                  summary={
+                    stockValuation?.interpretation.summary ??
+                    "가치평가를 실행하면 주식 valuation 해석이 표시됩니다."
+                  }
+                  title="결과 해석"
+                />
+                <InterpretationPanel
+                  assumptions={[
+                    `요구수익률 ${formatPercent(stockForm.required_return)}`,
+                    `CAPM 요구수익률 ${
+                      stockValuation
+                        ? formatPercent(
+                            stockValuation.results.capm_required_return,
+                          )
+                        : "계산 전"
+                    }`,
+                    `성장률 ${formatPercent(stockForm.growth_rate)}`,
+                    `Target P/E ${formatNumber(stockForm.target_pe, 1)}, target P/B ${formatNumber(
+                      stockForm.target_pb,
+                      1,
+                    )}`,
+                    "성장률이 요구수익률 이상이면 Gordon value는 표시하지 않습니다.",
+                  ]}
+                  summary="주식 모듈은 자산군 전용 foundation으로 분리했고, 시장위험 VaR는 여러 자산군에서 재사용할 수 있는 공통 구조로 유지합니다."
                   title="자산군 경계"
                 />
               </div>
