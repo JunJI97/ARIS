@@ -380,6 +380,44 @@ function calculateCapmReturn(
   return riskFreeRate + beta * (marketReturn - riskFreeRate);
 }
 
+function stockToPortfolioHolding(
+  instrument: StockInstrument,
+  marketValue: number,
+): PortfolioHoldingForm {
+  return {
+    asset_type: "stock",
+    instrument_id: instrument.instrument_id,
+    ticker: instrument.ticker,
+    name: instrument.name,
+    market_value: marketValue,
+    beta: instrument.beta,
+    duration: null,
+    expected_return: calculateCapmReturn(
+      fallbackStockForm.risk_free_rate,
+      fallbackStockForm.market_return,
+      instrument.beta,
+    ),
+    volatility: 0.22,
+  };
+}
+
+function bondToPortfolioHolding(
+  instrument: BondInstrument,
+  marketValue: number,
+): PortfolioHoldingForm {
+  return {
+    asset_type: "bond",
+    instrument_id: instrument.instrument_id,
+    ticker: instrument.name,
+    name: instrument.name,
+    market_value: marketValue,
+    beta: null,
+    duration: instrument.maturity_years,
+    expected_return: instrument.market_yield,
+    volatility: 0.06,
+  };
+}
+
 function concentrationLabel(level: "diversified" | "watch" | "high") {
   if (level === "diversified") return "분산 양호";
   if (level === "watch") return "집중 주의";
@@ -616,54 +654,6 @@ export default function Home() {
     [selectedStockInstrumentId, stockInstruments],
   );
 
-  useEffect(() => {
-    if (
-      portfolioHoldings.length > 0 ||
-      stockInstruments.length === 0 ||
-      instruments.length === 0
-    ) {
-      return;
-    }
-
-    const baseStockValues = [50000000, 30000000];
-    const stockHoldings: PortfolioHoldingForm[] = stockInstruments
-      .slice(0, 2)
-      .map((instrument, index) => ({
-        asset_type: "stock",
-        instrument_id: instrument.instrument_id,
-        ticker: instrument.ticker,
-        name: instrument.name,
-        market_value: baseStockValues[index] ?? 10000000,
-        beta: instrument.beta,
-        duration: null,
-        expected_return: calculateCapmReturn(
-          fallbackStockForm.risk_free_rate,
-          fallbackStockForm.market_return,
-          instrument.beta,
-        ),
-        volatility: 0.22,
-      }));
-
-    const bond = instruments[0];
-    const bondHolding: PortfolioHoldingForm | null = bond
-      ? {
-          asset_type: "bond",
-          instrument_id: bond.instrument_id,
-          ticker: bond.name,
-          name: bond.name,
-          market_value: 20000000,
-          beta: null,
-          duration: bond.maturity_years,
-          expected_return: bond.market_yield,
-          volatility: 0.06,
-        }
-      : null;
-
-    setPortfolioHoldings(
-      bondHolding ? [...stockHoldings, bondHolding] : stockHoldings,
-    );
-  }, [instruments, stockInstruments, portfolioHoldings.length]);
-
   const priceGap = useMemo(() => {
     if (!valuation) return null;
     return valuation.results.present_value - bondForm.face_value;
@@ -765,12 +755,15 @@ export default function Home() {
         }
       });
 
-    fetchJson<{ instruments: BondInstrument[] }>("/api/bonds/instruments")
-      .then((payload) => {
+    Promise.all([
+      fetchJson<{ instruments: BondInstrument[] }>("/api/bonds/instruments"),
+      fetchJson<{ instruments: StockInstrument[] }>("/api/stocks/instruments"),
+    ])
+      .then(([bondPayload, stockPayload]) => {
         if (!mounted) return;
 
-        setInstruments(payload.instruments);
-        const firstInstrument = payload.instruments[0];
+        setInstruments(bondPayload.instruments);
+        const firstInstrument = bondPayload.instruments[0];
 
         if (firstInstrument) {
           setSelectedInstrumentId(firstInstrument.instrument_id);
@@ -783,37 +776,55 @@ export default function Home() {
             payment_frequency: firstInstrument.payment_frequency,
           }));
         }
-      })
-      .catch((caught: Error) => {
-        if (mounted) {
-          setBondError(`채권 목록을 불러오지 못했습니다. ${caught.message}`);
-        }
-      });
 
-    fetchJson<{ instruments: StockInstrument[] }>("/api/stocks/instruments")
-      .then((payload) => {
-        if (!mounted) return;
+        setStockInstruments(stockPayload.instruments);
+        const firstStockInstrument = stockPayload.instruments[0];
 
-        setStockInstruments(payload.instruments);
-        const firstInstrument = payload.instruments[0];
-
-        if (firstInstrument) {
-          setSelectedStockInstrumentId(firstInstrument.instrument_id);
+        if (firstStockInstrument) {
+          setSelectedStockInstrumentId(firstStockInstrument.instrument_id);
           setStockForm((current) => ({
             ...current,
-            current_price: firstInstrument.last_price,
-            eps: firstInstrument.eps_ttm,
-            book_value_per_share: firstInstrument.book_value_per_share,
-            dividend_per_share: firstInstrument.dividend_per_share,
-            beta: firstInstrument.beta,
-            growth_rate: firstInstrument.expected_growth_rate,
-            shares_outstanding: firstInstrument.shares_outstanding,
+            current_price: firstStockInstrument.last_price,
+            eps: firstStockInstrument.eps_ttm,
+            book_value_per_share: firstStockInstrument.book_value_per_share,
+            dividend_per_share: firstStockInstrument.dividend_per_share,
+            beta: firstStockInstrument.beta,
+            growth_rate: firstStockInstrument.expected_growth_rate,
+            shares_outstanding: firstStockInstrument.shares_outstanding,
           }));
         }
+
+        setPortfolioHoldings((current) => {
+          if (
+            current.length > 0 ||
+            stockPayload.instruments.length === 0 ||
+            bondPayload.instruments.length === 0
+          ) {
+            return current;
+          }
+
+          const baseStockValues = [50000000, 30000000];
+          const stockHoldings = stockPayload.instruments
+            .slice(0, 2)
+            .map((instrument, index) =>
+              stockToPortfolioHolding(
+                instrument,
+                baseStockValues[index] ?? 10000000,
+              ),
+            );
+          const bondHolding = bondToPortfolioHolding(
+            bondPayload.instruments[0],
+            20000000,
+          );
+
+          return [...stockHoldings, bondHolding];
+        });
       })
       .catch((caught: Error) => {
         if (mounted) {
-          setStockError(`주식 목록을 불러오지 못했습니다. ${caught.message}`);
+          const message = `샘플 종목 목록을 불러오지 못했습니다. ${caught.message}`;
+          setBondError(message);
+          setStockError(message);
         }
       });
 
