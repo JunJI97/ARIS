@@ -201,6 +201,18 @@ function formatMoney(value: number, digits = 0) {
   }).format(value);
 }
 
+function formatMoneyGuide(value: number) {
+  const absoluteValue = Math.abs(value);
+
+  if (absoluteValue >= 100000000) {
+    return `약 ${(value / 100000000).toFixed(1)}억원`;
+  }
+  if (absoluteValue >= 10000) {
+    return `약 ${(value / 10000).toFixed(0)}만원`;
+  }
+  return `${formatMoney(value)}원`;
+}
+
 function formatPercent(value: number, digits = 2) {
   return `${(value * 100).toFixed(digits)}%`;
 }
@@ -390,24 +402,24 @@ export default function Home() {
 
   const readinessItems = [
     {
-      label: "채권 가치평가",
+      label: "채권",
       status: valuation ? "ready" : "waiting",
-      detail: valuation ? "계산 결과 확인 가능" : "실행 전",
+      detail: valuation ? "계산 가능" : "대기",
     },
     {
-      label: "신용위험 점수",
+      label: "신용위험",
       status: creditResult ? "ready" : "waiting",
-      detail: creditResult ? creditResult.results.grade : "실행 전",
+      detail: creditResult ? gradeLabel(creditResult.results.grade) : "대기",
     },
     {
-      label: "프로젝트 사업성",
+      label: "프로젝트",
       status: projectResult ? "ready" : "waiting",
-      detail: projectResult ? "NPV/IRR/회수기간 계산 완료" : "실행 전",
+      detail: projectResult ? "계산 가능" : "대기",
     },
     {
-      label: "시장위험 VaR",
+      label: "시장위험",
       status: marketResult ? "ready" : "waiting",
-      detail: marketResult ? "공통 위험 구조 검증 가능" : "실행 전",
+      detail: marketResult ? "VaR 계산 가능" : "대기",
     },
   ] as const;
 
@@ -452,9 +464,7 @@ export default function Home() {
 
     fetchJson<AssetTypesResponse>("/api/assets/types")
       .then((payload) => {
-        if (mounted) {
-          setAssetTypes(payload.asset_types);
-        }
+        if (mounted) setAssetTypes(payload.asset_types);
       })
       .catch((caught: Error) => {
         if (mounted) {
@@ -692,7 +702,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#f6f7f9] text-[#18202a]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6 lg:px-8">
-        <header className="flex flex-col gap-3 border-b border-[#d9dee7] pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <header className="flex flex-col gap-3 border-b border-[#d9dee7] pb-5">
           <div>
             <p className="text-sm font-semibold text-[#49627a]">
               Asset Risk Integrated System
@@ -701,66 +711,43 @@ export default function Home() {
               ARIS 통합 분석 대시보드
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-[#5b6675]">
-              채권 가치평가, 신용위험, 프로젝트 사업성, 시장위험 VaR을 하나의
-              작업 화면에서 다루고, 이후 주식 자산군 확장을 위한 구조까지 함께
-              확인할 수 있습니다.
+              채권 가치평가, 신용위험, 프로젝트 사업성, 시장위험 VaR을 한 화면에서
+              다루고 이후 주식 자산군 확장까지 대비한 구조를 함께 확인할 수
+              있습니다.
             </p>
           </div>
-          <a
-            className="inline-flex items-center rounded border border-[#cfd6e0] bg-white px-4 py-2 text-sm font-semibold text-[#1f4f8f] shadow-sm"
-            href={`${API_BASE_URL}/docs`}
-            rel="noreferrer"
-            target="_blank"
-          >
-            FastAPI Docs
-          </a>
         </header>
 
-        <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-          <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">MVP 통합 상태</h2>
-                <p className="mt-1 text-sm text-[#6b7280]">
-                  각 vertical slice가 한 대시보드 안에서 연결된 상태를 확인합니다.
-                </p>
-              </div>
-              <span className="rounded bg-[#eaf2ff] px-3 py-1 text-xs font-semibold text-[#1f4f8f]">
-                활성 자산군 {enabledAssetCount}개
+        <section className="rounded border border-[#d9dee7] bg-white px-4 py-3 shadow-sm">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-[#18202a]">
+                지원 분석
               </span>
+              <span className="rounded bg-[#eaf2ff] px-2.5 py-1 text-xs font-semibold text-[#1f4f8f]">
+                사용 가능 자산군 {enabledAssetCount}개
+              </span>
+              <span className="rounded bg-[#eef2f7] px-2.5 py-1 text-xs font-semibold text-[#5b6675]">
+                자산군 확장 준비됨
+              </span>
+              {assetTypeError ? (
+                <span className="text-xs text-[#9f2f1f]">{assetTypeError}</span>
+              ) : (
+                assetTypes.map((assetType) => (
+                  <AssetTypePill key={assetType.asset_type} assetType={assetType} />
+                ))
+              )}
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+
+            <div className="flex flex-wrap gap-2">
               {readinessItems.map((item) => (
-                <OverviewCard
+                <StatusChip
                   key={item.label}
                   detail={item.detail}
                   label={item.label}
                   status={item.status}
                 />
               ))}
-            </div>
-          </div>
-
-          <div className="rounded border border-[#d9dee7] bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">자산군 준비도</h2>
-                <p className="mt-1 text-sm text-[#6b7280]">
-                  UI와 API에서 자산군 경계가 어떻게 표현되는지 보여줍니다.
-                </p>
-              </div>
-              <span className="text-xs font-medium text-[#6b7280]">
-                Multi-Asset Ready
-              </span>
-            </div>
-            <div className="mt-4 space-y-3">
-              {assetTypeError ? (
-                <AlertBox tone="error">{assetTypeError}</AlertBox>
-              ) : (
-                assetTypes.map((assetType) => (
-                  <AssetTypeCard key={assetType.asset_type} assetType={assetType} />
-                ))
-              )}
             </div>
           </div>
         </section>
@@ -1071,7 +1058,7 @@ export default function Home() {
                     )}`,
                     "채권 valuation 로직은 bond 전용 서비스로 분리되어 있습니다.",
                   ]}
-                  summary="수익률과 표면금리는 decimal 값으로 입력합니다. 채권 valuation은 자산군 전용 계산이고, 공통 위험 지표와는 경계를 분리해 유지합니다."
+                  summary="수익률과 표면금리는 decimal 값으로 입력합니다. 채권 valuation은 자산군 전용 계산이고 공통 위험 지표와는 경계를 분리해 유지합니다."
                   title="자산군 경계"
                 />
               </div>
@@ -1672,11 +1659,20 @@ function NumberField({
   step?: string;
   suffix?: string;
 }) {
+  const moneyHint =
+    suffix === "원" && Number.isFinite(value)
+      ? `${formatMoney(value)}원 · ${formatMoneyGuide(value)}`
+      : null;
+
   return (
     <label className="block text-sm font-medium text-[#384252]">
       <div className="flex items-center justify-between gap-3">
         <span>{label}</span>
-        {suffix ? <span className="text-xs text-[#7a8492]">{suffix}</span> : null}
+        {suffix ? (
+          <span className="text-xs text-[#7a8492]">
+            {suffix === "원" ? formatMoneyGuide(value) : suffix}
+          </span>
+        ) : null}
       </div>
       <input
         className="mt-2 w-full rounded border border-[#cfd6e0] bg-white px-3 py-2 text-sm outline-none focus:border-[#1f6feb]"
@@ -1685,6 +1681,9 @@ function NumberField({
         type="number"
         value={value}
       />
+      {moneyHint ? (
+        <span className="mt-2 block text-xs text-[#7a8492]">{moneyHint}</span>
+      ) : null}
     </label>
   );
 }
@@ -1707,7 +1706,7 @@ function MetricCard({
   );
 }
 
-function OverviewCard({
+function StatusChip({
   label,
   detail,
   status,
@@ -1717,25 +1716,21 @@ function OverviewCard({
   status: "ready" | "waiting";
 }) {
   return (
-    <div className="rounded border border-[#d9dee7] bg-[#fafbfc] p-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-[#18202a]">{label}</p>
-        <span
-          className={
-            status === "ready"
-              ? "rounded bg-[#e6f4ea] px-2 py-1 text-xs font-semibold text-[#1b6b3a]"
-              : "rounded bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#5b6675]"
-          }
-        >
-          {status === "ready" ? "준비됨" : "대기"}
-        </span>
-      </div>
-      <p className="mt-2 text-xs leading-5 text-[#6b7280]">{detail}</p>
+    <div className="inline-flex items-center gap-2 rounded border border-[#d9dee7] bg-[#fafbfc] px-3 py-1.5">
+      <span
+        className={
+          status === "ready"
+            ? "h-2 w-2 rounded-full bg-[#1b6b3a]"
+            : "h-2 w-2 rounded-full bg-[#9aa4b2]"
+        }
+      />
+      <span className="text-xs font-semibold text-[#18202a]">{label}</span>
+      <span className="text-xs text-[#6b7280]">{detail}</span>
     </div>
   );
 }
 
-function AssetTypeCard({ assetType }: { assetType: AssetTypeInfo }) {
+function AssetTypePill({ assetType }: { assetType: AssetTypeInfo }) {
   const tone =
     assetType.status === "enabled"
       ? "bg-[#e6f4ea] text-[#1b6b3a]"
@@ -1744,18 +1739,9 @@ function AssetTypeCard({ assetType }: { assetType: AssetTypeInfo }) {
         : "bg-[#fde8e6] text-[#a1261a]";
 
   return (
-    <div className="rounded border border-[#d9dee7] bg-[#fafbfc] p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-[#18202a]">{assetType.label}</p>
-          <p className="mt-1 text-xs text-[#6b7280]">{assetType.asset_type}</p>
-        </div>
-        <span className={`rounded px-2 py-1 text-xs font-semibold ${tone}`}>
-          {assetType.status}
-        </span>
-      </div>
-      <p className="mt-2 text-sm leading-6 text-[#4b5563]">{assetType.description}</p>
-    </div>
+    <span className={`rounded px-2.5 py-1 text-xs font-semibold ${tone}`}>
+      {assetType.label} {assetType.status}
+    </span>
   );
 }
 
