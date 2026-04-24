@@ -9,7 +9,7 @@ class AssetsAndBondsApiTest(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
 
-    def test_asset_types_include_enabled_bond_and_planned_stock(self) -> None:
+    def test_asset_types_include_enabled_bond_and_stock(self) -> None:
         response = self.client.get("/api/assets/types")
 
         self.assertEqual(response.status_code, 200)
@@ -26,7 +26,7 @@ class AssetsAndBondsApiTest(unittest.TestCase):
             ],
         )
         self.assertIn(
-            {"asset_type": "stock", "status": "planned"},
+            {"asset_type": "stock", "status": "enabled"},
             [
                 {
                     "asset_type": asset_type["asset_type"],

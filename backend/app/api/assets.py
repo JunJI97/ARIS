@@ -18,8 +18,8 @@ def get_asset_types() -> AssetTypesResponse:
             AssetType(
                 asset_type="stock",
                 label="주식",
-                status="planned",
-                description="MVP 이후 포트폴리오 위험 분석 확장을 위해 예약된 자산군입니다.",
+                status="enabled",
+                description="Equity sample instruments, valuation metrics, and growth scenarios are available.",
             ),
         ]
     )
